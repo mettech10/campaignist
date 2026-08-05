@@ -4,10 +4,14 @@ services:
     runtime: python
     region: frankfurt
     plan: starter
+    # requirements.txt and wsgi.py live in api/, not at the repo root. Creating
+    # the service manually instead of from this Blueprint leaves rootDir unset,
+    # and the build fails on "Could not open requirements file".
     rootDir: api
     buildCommand: pip install -r requirements.txt
-    # Threads, not processes: generations are I/O-bound on the Claude API, and
-    # the pipeline runner uses background threads that must share the worker.
+    # Threads, not processes: model calls are I/O-bound, and the pipeline runner
+    # uses background threads that must share the worker. --threads > 1 is what
+    # switches gunicorn from the sync worker to gthread.
     startCommand: gunicorn wsgi:app --workers 2 --threads 8 --timeout 120
     healthCheckPath: /api/health
     envVars:
