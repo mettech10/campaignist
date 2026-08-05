@@ -153,6 +153,46 @@ API has persisted into `pipeline_outputs`, so a slow step sits visibly at
 **Nothing has run against a live model API yet.** That needs `KIMI_API_KEY` in
 `api/.env` and is the first thing to do.
 
+## Deploying
+
+**Render** hosts the Flask API. `render.yaml` sits at the repo root (Render only
+reads Blueprints from there) with `rootDir: api`.
+
+| Setting | Value |
+|---|---|
+| Root directory | `api` |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `gunicorn wsgi:app --workers 2 --threads 8 --timeout 120` |
+| Health check | `/api/health` |
+
+`--threads 8` is load-bearing, not tuning: it switches gunicorn from the `sync`
+worker to `gthread`. Generation runs in a background thread and step 4 fans out
+over a thread pool, so a single-threaded worker would serialise the whole
+pipeline. `--timeout 120` covers the slowest single model call; the generation
+request itself returns 202 immediately and the frontend polls.
+
+Two workers is safe because no pipeline state lives in process memory — a poll
+that lands on the other worker reads the same row from Supabase.
+
+Environment variables, split by where they are safe:
+
+* **Render** (all secret): `KIMI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
+  `MODEL_STRATEGY`, `MODEL_CONTENT`, `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `CORS_ORIGINS` (your Vercel domain).
+* **Vercel** (all publishable): `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL` (the Render URL).
+
+The service-role and Kimi keys must never go in Vercel — anything prefixed
+`NEXT_PUBLIC_` is compiled into the browser bundle.
+
+`GET /api/health` reports what each pipeline role resolved to and whether its
+key is present, so check that first after a deploy.
+
+**pnpm note for `web/`:** Vercel runs pnpm 10, pinned via `packageManager` in
+package.json. Install with `corepack pnpm@10.18.0 install`, never bare `pnpm` —
+a newer local pnpm silently drops the lockfile's `overrides` block and breaks
+the deploy.
+
 ## Choosing a model — the golden set
 
 `api/evals/` is the blueprint's §11 mitigation ("golden-set of 10 test
