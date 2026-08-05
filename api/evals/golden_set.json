@@ -1,0 +1,136 @@
+{
+  "description": "Ten UK micro-businesses spanning the range the pipeline has to handle: different industries, budgets from £0 to £900, and brand voices that should visibly change the copy. Deliberately includes thin inputs and awkward cases — an even spread of easy briefs would tell you nothing.",
+  "businesses": [
+    {
+      "id": "bakery",
+      "note": "The blueprint's worked example. Rich input, clear differentiator.",
+      "business": {
+        "name": "Hearth & Crumb Bakery",
+        "industry": "Food & Beverage",
+        "location": "Manchester, UK",
+        "offer_description": "Artisan sourdough, celebration cakes, and a weekly bread subscription baked in small batches.",
+        "price_point": "£4–£85 per item, £18/mo subscription",
+        "website": "https://hearthandcrumb.example",
+        "brand_voice": {"tone": "Conversational", "energy": "Warm", "humor": "Light touches", "authority": "Guide", "detail": "Storyteller"}
+      },
+      "campaign": {"goal": "Book 25 wedding cake consultations before peak season", "budget": 750, "timeframe_days": 30}
+    },
+    {
+      "id": "zero-budget-gym",
+      "note": "£0 budget. The plan must be organic-only and say so rather than quietly assuming ad spend.",
+      "business": {
+        "name": "Studio Forma",
+        "industry": "Health & Fitness",
+        "location": "Leeds, UK",
+        "offer_description": "Small-group reformer pilates, maximum six people per class.",
+        "price_point": "£22 per class, £95/mo unlimited",
+        "brand_voice": {"tone": "Casual", "energy": "Bold", "humor": "Playful", "authority": "Peer", "detail": "Straight to the point"}
+      },
+      "campaign": {"goal": "Fill the six Saturday morning classes every week", "budget": 0, "timeframe_days": 30}
+    },
+    {
+      "id": "thin-input-plumber",
+      "note": "Deliberately sparse. Should populate `constraints` with what is unknown instead of inventing detail.",
+      "business": {
+        "name": "R. Okafor Plumbing",
+        "industry": "Home & Trades",
+        "location": "Croydon",
+        "offer_description": "Emergency plumbing and boiler repair.",
+        "price_point": "",
+        "brand_voice": {"tone": "Formal", "energy": "Calm", "humor": "Serious", "authority": "Expert", "detail": "Straight to the point"}
+      },
+      "campaign": {"goal": "Get more emergency callouts", "budget": 200, "timeframe_days": 30}
+    },
+    {
+      "id": "b2b-saas",
+      "note": "Long sales cycle, LinkedIn-shaped. Should not default to Instagram Reels.",
+      "business": {
+        "name": "Ledgerloop",
+        "industry": "Software & SaaS",
+        "location": "Bristol, UK",
+        "offer_description": "Reconciliation software for small accountancy practices. Connects to Xero and flags mismatches before month end.",
+        "price_point": "£89/mo per practice",
+        "brand_voice": {"tone": "Formal", "energy": "Calm", "humor": "Serious", "authority": "Expert", "detail": "Balanced"}
+      },
+      "campaign": {"goal": "Get 15 practices onto a free trial before the January rush", "budget": 900, "timeframe_days": 60}
+    },
+    {
+      "id": "regulated-adjacent",
+      "note": "Health-adjacent. Must not promise outcomes; watch for regulated claims.",
+      "business": {
+        "name": "Quiet Hours Sleep Coaching",
+        "industry": "Education & Coaching",
+        "location": "Edinburgh, UK",
+        "offer_description": "Six-week one-to-one sleep coaching for parents of babies and toddlers. Not medical advice.",
+        "price_point": "£420 for the six-week programme",
+        "brand_voice": {"tone": "Conversational", "energy": "Calm", "humor": "Serious", "authority": "Guide", "detail": "Balanced"}
+      },
+      "campaign": {"goal": "Book 12 discovery calls", "budget": 300, "timeframe_days": 30}
+    },
+    {
+      "id": "ecommerce",
+      "note": "Product-led, visual. Product and lifestyle shots should feature.",
+      "business": {
+        "name": "Ridgeway Candle Co.",
+        "industry": "E-commerce & Retail",
+        "location": "Sheffield, UK",
+        "offer_description": "Hand-poured soy candles in refillable ceramic vessels. Refills posted for half the price of a new candle.",
+        "price_point": "£26 first purchase, £13 refills",
+        "brand_voice": {"tone": "Conversational", "energy": "Warm", "humor": "Light touches", "authority": "Peer", "detail": "Balanced"}
+      },
+      "campaign": {"goal": "Grow repeat refill orders from 12% to 25% of revenue", "budget": 450, "timeframe_days": 30}
+    },
+    {
+      "id": "professional-services",
+      "note": "Referral-driven, trust-heavy, low volume. Should not recommend high-cadence posting.",
+      "business": {
+        "name": "Alder & Finch Family Law",
+        "industry": "Professional Services",
+        "location": "Norwich, UK",
+        "offer_description": "Fixed-fee divorce and separation support, with a mediation-first approach.",
+        "price_point": "£1,200–£3,500 fixed fee",
+        "brand_voice": {"tone": "Formal", "energy": "Calm", "humor": "Serious", "authority": "Expert", "detail": "Balanced"}
+      },
+      "campaign": {"goal": "Get 8 initial consultations a month from outside our referral network", "budget": 600, "timeframe_days": 60}
+    },
+    {
+      "id": "playful-voice",
+      "note": "The only brief where meme-overlay should be eligible.",
+      "business": {
+        "name": "Bad Dog Coffee",
+        "industry": "Food & Beverage",
+        "location": "Glasgow, UK",
+        "offer_description": "A dog-friendly speciality coffee shop with a rotating single-origin filter and free biscuits for dogs.",
+        "price_point": "£3.20–£4.50 a cup",
+        "brand_voice": {"tone": "Casual", "energy": "Bold", "humor": "Playful", "authority": "Peer", "detail": "Straight to the point"}
+      },
+      "campaign": {"goal": "Get 200 people onto the loyalty app before winter", "budget": 150, "timeframe_days": 21}
+    },
+    {
+      "id": "creative-freelance",
+      "note": "One-person business selling their own taste. Founder-to-camera should feature.",
+      "business": {
+        "name": "Marek Sokol Photography",
+        "industry": "Creative & Media",
+        "location": "Cardiff, UK",
+        "offer_description": "Documentary-style wedding photography. No posed group shots, full gallery within two weeks.",
+        "price_point": "£1,850 full day",
+        "brand_voice": {"tone": "Conversational", "energy": "Calm", "humor": "Light touches", "authority": "Peer", "detail": "Storyteller"}
+      },
+      "campaign": {"goal": "Book 10 weddings for next summer", "budget": 400, "timeframe_days": 60}
+    },
+    {
+      "id": "short-timeframe",
+      "note": "14 days. The calendar must not exceed the timeframe.",
+      "business": {
+        "name": "The Old Pier Fish Bar",
+        "industry": "Food & Beverage",
+        "location": "Whitby, UK",
+        "offer_description": "Fish and chips fried in beef dripping, using day-boat catch from the harbour.",
+        "price_point": "£9.50 regular cod and chips",
+        "brand_voice": {"tone": "Casual", "energy": "Warm", "humor": "Light touches", "authority": "Peer", "detail": "Straight to the point"}
+      },
+      "campaign": {"goal": "Pull in the bank holiday weekend crowd", "budget": 120, "timeframe_days": 14}
+    }
+  ]
+}

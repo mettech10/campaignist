@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: ai-marketing-api
+    runtime: python
+    region: frankfurt
+    plan: starter
+    rootDir: api
+    buildCommand: pip install -r requirements.txt
+    # Threads, not processes: generations are I/O-bound on the Claude API, and
+    # the pipeline runner uses background threads that must share the worker.
+    startCommand: gunicorn wsgi:app --workers 2 --threads 8 --timeout 120
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: FLASK_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: KIMI_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_STARTER
+        sync: false
+      - key: STRIPE_PRICE_GROWTH
+        sync: false
+      - key: STRIPE_PRICE_PRO
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

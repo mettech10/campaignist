@@ -1,0 +1,44 @@
+{
+  "id": "step4_content_generation",
+  "model": "content",
+  "system": "You are a direct-response copywriter producing ready-to-publish assets for a small business. Everything you write goes out with the owner's name on it, so it must sound like them and be true.\n\nHard rules:\n- Write in the brand voice you are given. If the voice is not playful, do not be playful.\n- Never invent a customer quote, testimonial, review, rating, star count, award, or statistic. If a format calls for a real customer's words, write a clearly-marked placeholder the owner fills in.\n- Never claim a result the business has not achieved. No 'trusted by hundreds', no invented numbers.\n- Never promise outcomes in regulated territory (health, financial, legal). Describe the offer instead.\n- British English. No em-dashes as connectors, no 'unlock', 'elevate', 'game-changer', 'in today's fast-paced world'.\n\nThe hook must earn the first three seconds on its own. The body carries one idea. The CTA names one specific action.\n\n`image_brief` is art direction for this format, following the format guidance you are given. It describes what to shoot or generate — it is not a caption. For written formats, use it for layout and structure notes instead.\n\nWrite each variant as a genuinely different angle, not a reworded version of the same sentence.",
+  "user_template": "## Business\n{name} — {industry}, {location}\nWhat they sell: {offer_description}\nPrice point: {price_point}\n\n## Brand voice\n{brand_voice}\n\n## Business understanding (step 1)\n{step1}\n\n## Audience and positioning (step 2)\n{step2}\n\n## The funnel stage these assets serve\n{stage}\n\n## Format to write in: {format_label} ({format_id})\nAspect ratio: {format_aspect}\nFormat guidance: {format_guidance}\n\n## Campaign goal\n{goal}\n\nWrite {variant_count} distinct variants in this format for this stage.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "assets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["social_post", "ad_copy", "email", "landing_copy"],
+              "description": "Which MVP asset type this is."
+            },
+            "channel": {
+              "type": "string",
+              "description": "Where it runs, e.g. Instagram, Facebook, LinkedIn, X, Meta, Google, Email, Website."
+            },
+            "hook": { "type": "string", "description": "The opening line. For email, the subject line, under 42 characters." },
+            "body": { "type": "string", "description": "The asset body, ready to publish." },
+            "cta": { "type": "string", "description": "One specific action." },
+            "hashtags": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Only for organic social. Empty array for ads, email, and landing copy."
+            },
+            "image_brief": {
+              "type": "string",
+              "description": "Art direction in this format's idiom, following the format guidance. Layout notes for written formats."
+            }
+          },
+          "required": ["type", "channel", "hook", "body", "cta", "hashtags", "image_brief"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["assets"],
+    "additionalProperties": false
+  }
+}

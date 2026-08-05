@@ -1,0 +1,18 @@
+# Secrets
+.env
+.env.local
+*.env
+
+# Python
+api/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Eval output — regenerate with evals/run_eval.py
+api/evals/runs/
+
+# The frontend is its own repository (v0 pushes to it)
+web/
+
+.DS_Store
