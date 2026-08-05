@@ -188,6 +188,18 @@ The service-role and Kimi keys must never go in Vercel — anything prefixed
 `GET /api/health` reports what each pipeline role resolved to and whether its
 key is present, so check that first after a deploy.
 
+The API is on Render's **free** plan while it is being set up. Two consequences
+worth knowing:
+
+* Free instances spin down after ~15 minutes idle and cold-start in roughly 50
+  seconds, so the first campaign after a quiet spell looks like a hang.
+* A generation runs in a background thread and the request returns 202
+  immediately. If the worker restarts mid-run — a deploy, or a spin-down — that
+  thread dies and the campaign is left `generating` forever with the credit
+  already spent. There is no reaper for that yet; see Open decisions.
+
+Switch to `starter` before any beta user touches it.
+
 **pnpm note for `web/`:** Vercel runs pnpm 10, pinned via `packageManager` in
 package.json. Install with `corepack pnpm@10.18.0 install`, never bare `pnpm` —
 a newer local pnpm silently drops the lockfile's `overrides` block and breaks
@@ -238,5 +250,11 @@ rather than on hunting broken references.
    hold the same v0 scaffold. The product is called Campaignist everywhere, so
    the former is the misnomer — but it is the one v0 pushes to and the one
    `web/` tracks.
-3. **Backend repo.** `api/` is untracked. `render.yaml` sets `rootDir: api`, so
+3. **Stuck generations.** A campaign whose worker died mid-run stays
+   `generating` with no timeout and no refund. Cheapest fix is a stale-campaign
+   check on the polling GET: if `status = generating` and `created_at` is older
+   than a few minutes with no new `pipeline_outputs` key, mark it `error` and
+   return the credit. Needed before beta users, and more urgent on the free plan
+   where spin-downs are routine.
+4. **Backend repo.** `api/` is untracked. `render.yaml` sets `rootDir: api`, so
    either a monorepo or its own repo works.
