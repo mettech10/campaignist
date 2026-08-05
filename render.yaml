@@ -3,10 +3,10 @@ services:
     name: ai-marketing-api
     runtime: python
     region: frankfurt
-    # Free while setting up. Free instances spin down after ~15 minutes idle and
-    # cold-start in roughly 50s, so the first generation after a quiet spell will
-    # feel like a hang. Move to `starter` before any beta user touches it.
-    plan: free
+    # Starter ($7/mo). Chosen over free because free instances spin down after
+    # ~15 minutes idle: a generation runs in a background thread, so a spin-down
+    # mid-run would strand the campaign in `generating` with the credit spent.
+    plan: starter
     # requirements.txt and wsgi.py live in api/, not at the repo root. Creating
     # the service manually instead of from this Blueprint leaves rootDir unset,
     # and the build fails on "Could not open requirements file".

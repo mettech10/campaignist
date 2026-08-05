@@ -188,17 +188,14 @@ The service-role and Kimi keys must never go in Vercel — anything prefixed
 `GET /api/health` reports what each pipeline role resolved to and whether its
 key is present, so check that first after a deploy.
 
-The API is on Render's **free** plan while it is being set up. Two consequences
-worth knowing:
+The API runs on Render's **starter** plan ($7/mo). Free was rejected because
+free instances spin down after ~15 minutes idle, and a generation runs in a
+background thread that returns 202 immediately — a spin-down mid-run would
+strand the campaign in `generating` with the credit already spent.
 
-* Free instances spin down after ~15 minutes idle and cold-start in roughly 50
-  seconds, so the first campaign after a quiet spell looks like a hang.
-* A generation runs in a background thread and the request returns 202
-  immediately. If the worker restarts mid-run — a deploy, or a spin-down — that
-  thread dies and the campaign is left `generating` forever with the credit
-  already spent. There is no reaper for that yet; see Open decisions.
-
-Switch to `starter` before any beta user touches it.
+That failure mode still exists on starter, just far more rarely: a deploy during
+a generation does the same thing. There is no reaper for it yet — see Open
+decisions.
 
 **pnpm note for `web/`:** Vercel runs pnpm 10, pinned via `packageManager` in
 package.json. Install with `corepack pnpm@10.18.0 install`, never bare `pnpm` —
@@ -254,7 +251,7 @@ rather than on hunting broken references.
    `generating` with no timeout and no refund. Cheapest fix is a stale-campaign
    check on the polling GET: if `status = generating` and `created_at` is older
    than a few minutes with no new `pipeline_outputs` key, mark it `error` and
-   return the credit. Needed before beta users, and more urgent on the free plan
-   where spin-downs are routine.
+   return the credit. Rare on starter (deploys only), but needed before beta
+   users since it currently costs them a credit with no recovery.
 4. **Backend repo.** `api/` is untracked. `render.yaml` sets `rootDir: api`, so
    either a monorepo or its own repo works.
