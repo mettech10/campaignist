@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from flask import Blueprint, jsonify
 
 from ..config import Config
@@ -30,6 +32,15 @@ def health():
             "stripe": bool(Config.STRIPE_SECRET_KEY),
             "stripe_webhook": bool(Config.STRIPE_WEBHOOK_SECRET),
         },
+        # A boolean cannot show that SUPABASE_URL points at the *wrong* project,
+        # which presents as every valid token being rejected: JWKS returns a
+        # different signing key, so signature verification fails. The host is
+        # already public (the browser bundle carries it), so surfacing it costs
+        # nothing and makes that misconfiguration self-diagnosing.
+        supabase_host=urlparse(Config.SUPABASE_URL).netloc or None,
+        # Which scheme incoming tokens will be verified under.
+        jwt_verification="HS256 (shared secret)" if Config.SUPABASE_JWT_SECRET
+        else "JWKS (asymmetric)",
     )
 
 
