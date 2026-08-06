@@ -123,6 +123,13 @@ begin
   exception when insufficient_privilege then null;
   end;
 
+  -- refund_credit hands out credits; it must not be reachable from the browser
+  begin
+    perform public.refund_credit(auth.uid(), 'free money', null);
+    raise exception 'ESCALATION: refund_credit callable by authenticated';
+  exception when insufficient_privilege then null;
+  end;
+
   raise notice 'all assertions passed';
 end $$;
 rollback;

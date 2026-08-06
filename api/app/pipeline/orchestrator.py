@@ -240,9 +240,12 @@ def generate(campaign_id: str) -> None:
             saved = supabase.insert("content_assets", new_rows)
             ctx.assets.extend(saved if isinstance(saved, list) else [saved])
 
+        # progress_at is the reaper's heartbeat — without it a long stage looks
+        # identical to a dead worker.
         supabase.update(
             "campaigns",
-            {"pipeline_outputs": ctx.outputs, "cost_gbp": round(ctx.cost_gbp, 4)},
+            {"pipeline_outputs": ctx.outputs, "cost_gbp": round(ctx.cost_gbp, 4),
+             "progress_at": datetime.now(timezone.utc).isoformat()},
             params={"id": f"eq.{campaign_id}"}, returning=False,
         )
 
@@ -263,7 +266,8 @@ def generate(campaign_id: str) -> None:
     supabase.update(
         "campaigns",
         {"status": "ready", "pipeline_outputs": ctx.outputs, "calendar": calendar,
-         "cost_gbp": round(ctx.cost_gbp, 4), "error": None},
+         "cost_gbp": round(ctx.cost_gbp, 4), "error": None,
+         "progress_at": datetime.now(timezone.utc).isoformat()},
         params={"id": f"eq.{campaign_id}"}, returning=False,
     )
     log.info("[orchestrator] campaign %s complete — £%.4f, %d assets",

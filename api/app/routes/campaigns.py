@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from flask import Blueprint, g, jsonify, request
 
 from .. import credits, supabase
+from ..pipeline import reaper
 from ..auth import require_auth
 from ..pipeline import runner
 
@@ -46,6 +49,8 @@ def create_campaign():
         )
         return jsonify(error="insufficient_credits"), 402
 
+    supabase.update("campaigns", {"progress_at": datetime.now(timezone.utc).isoformat()},
+                    params={"id": f"eq.{campaign['id']}"}, returning=False)
     runner.start(campaign["id"])
     return jsonify(campaign_id=campaign["id"], status="generating", credits=remaining), 202
 
@@ -81,7 +86,9 @@ def get_campaign(campaign_id):
     if not campaign:
         return jsonify(error="not_found"), 404
     campaign.pop("businesses", None)  # join artefact from the ownership check
-    return jsonify(campaign)
+    # The polling UI is what would otherwise hang forever on a dead worker, so
+    # the staleness check belongs here rather than in a scheduler.
+    return jsonify(reaper.reap(campaign))
 
 
 @bp.post("/api/campaigns/<campaign_id>/regenerate")

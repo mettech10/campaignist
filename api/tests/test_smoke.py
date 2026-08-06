@@ -443,3 +443,86 @@ def test_none_temperature_is_not_sent_to_the_api(monkeypatch):
         schema={}, schema_name="n", max_tokens=100, temperature=None,
     )
     assert "temperature" not in captured
+
+
+# ── Stalled-generation reaper ───────────────────────────────────────────────
+
+def _campaign(status="generating", minutes_ago=0):
+    from datetime import datetime, timedelta, timezone
+    ts = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
+    return {"id": "c1", "business_id": "b1", "status": status, "progress_at": ts}
+
+
+def test_a_live_generation_is_not_reaped():
+    from app.pipeline import reaper
+
+    assert not reaper.is_stale(_campaign(minutes_ago=0))
+    assert not reaper.is_stale(_campaign(minutes_ago=11))
+
+
+def test_a_silent_generation_is_stale():
+    from app.pipeline import reaper
+
+    assert reaper.is_stale(_campaign(minutes_ago=13))
+
+
+def test_settled_campaigns_are_never_reaped():
+    from app.pipeline import reaper
+
+    for status in ("ready", "live", "completed", "error", "draft"):
+        assert not reaper.is_stale(_campaign(status=status, minutes_ago=999))
+
+
+def test_reaping_marks_error_and_refunds_the_credit(monkeypatch):
+    from app.pipeline import reaper
+
+    calls = {}
+
+    def fake_update(table, patch, **kw):
+        calls["update"] = (patch, kw)
+        return {**_campaign(status="error"), **patch}
+
+    def fake_refund(user_id, reason, campaign_id):
+        calls["refund"] = (user_id, reason, campaign_id)
+        return 1
+
+    monkeypatch.setattr(reaper.supabase, "update", fake_update)
+    monkeypatch.setattr(reaper.supabase, "select", lambda t, **kw: {"user_id": "u1"})
+    monkeypatch.setattr(reaper.credits, "refund", fake_refund)
+
+    out = reaper.reap(_campaign(minutes_ago=30))
+    patch, kw = calls["update"]
+    assert patch["status"] == "error"
+    # Only reap a row still generating, so a run that finished in the meantime
+    # is not clobbered.
+    assert kw["params"]["status"] == "eq.generating"
+    assert calls["refund"] == ("u1", "stalled_generation", "c1")
+    assert out["status"] == "error"
+
+
+def test_a_lost_race_does_not_refund(monkeypatch):
+    """If the campaign completed between the check and the write, the update
+    matches nothing — and no credit should be handed back."""
+    from app.pipeline import reaper
+
+    refunded = []
+    monkeypatch.setattr(reaper.supabase, "update", lambda t, patch, **kw: None)
+    monkeypatch.setattr(reaper.credits, "refund",
+                        lambda *a: refunded.append(a))
+
+    campaign = _campaign(minutes_ago=30)
+    assert reaper.reap(campaign) is campaign
+    assert refunded == []
+
+
+def test_a_failed_refund_still_leaves_the_campaign_marked(monkeypatch):
+    from app.pipeline import reaper
+
+    monkeypatch.setattr(reaper.supabase, "update",
+                        lambda t, patch, **kw: {**_campaign(status="error"), **patch})
+    monkeypatch.setattr(reaper.supabase, "select", lambda t, **kw: {"user_id": "u1"})
+    monkeypatch.setattr(reaper.credits, "refund",
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("supabase down")))
+
+    out = reaper.reap(_campaign(minutes_ago=30))
+    assert out["status"] == "error"

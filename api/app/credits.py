@@ -80,3 +80,18 @@ def set_plan(user_id: str, plan: str, reason: str) -> None:
         {"user_id": user_id, "delta": PLAN_CREDITS[plan], "reason": reason},
         returning=False,
     )
+
+
+def refund(user_id: str, reason: str, campaign_id: str) -> int:
+    """Return a credit spent on a generation that produced nothing.
+
+    Idempotent per campaign — the Postgres function skips a campaign that
+    already has a positive ledger row, so two workers reaping the same campaign
+    cannot hand out the credit twice.
+    """
+    return int(
+        supabase.rpc(
+            "refund_credit",
+            {"p_user_id": user_id, "p_reason": reason, "p_campaign_id": campaign_id},
+        )
+    )
