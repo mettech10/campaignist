@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, jsonify
 
 from ..config import Config
+from .. import render_queue
 from ..pipeline import llm, orchestrator, providers, reaper
 
 bp = Blueprint("health", __name__)
@@ -60,6 +61,15 @@ def health():
             "request_timeout_seconds": providers.REQUEST_TIMEOUT,
             "heartbeat_seconds": orchestrator.HEARTBEAT_EVERY.total_seconds(),
             "reaped_after_seconds": reaper.STALE_AFTER.total_seconds(),
+        },
+        # The GPU worker is a separate machine that can only be diagnosed from
+        # here — if its token is unset the queue refuses it and the symptom is
+        # simply that no video ever appears.
+        renders={
+            "worker_token_present": bool(Config.RENDER_WORKER_TOKEN),
+            "lease_timeout_seconds": render_queue.LEASE_TIMEOUT.total_seconds(),
+            "max_attempts": render_queue.MAX_ATTEMPTS,
+            "video_formats": sorted(render_queue.VIDEO_FORMATS),
         },
     )
 

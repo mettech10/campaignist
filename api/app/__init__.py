@@ -24,7 +24,7 @@ def create_app() -> Flask:
     if missing:
         app.logger.warning("[config] not set: %s", ", ".join(missing))
 
-    from .routes import assets, billing, business, campaigns, health, results
+    from .routes import assets, billing, business, campaigns, health, renders, results
 
     app.register_blueprint(health.bp)
     app.register_blueprint(business.bp)
@@ -32,6 +32,7 @@ def create_app() -> Flask:
     app.register_blueprint(assets.bp)
     app.register_blueprint(results.bp)
     app.register_blueprint(billing.bp)
+    app.register_blueprint(renders.bp)
 
     @app.errorhandler(404)
     def not_found(_):

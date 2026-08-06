@@ -123,6 +123,14 @@ class Config:
             raise ConfigError(f"{provider!r} is not an OpenAI-compatible provider")
         return cls.require_key(provider), base
 
+    # ── GPU render worker ───────────────────────────────────────────────────
+    # Shared secret for the rented GPU box. Deliberately not the service-role
+    # key: the worker runs on an interruptible Vast.ai instance owned by an
+    # anonymous marketplace host, so it gets a credential that can claim jobs
+    # and upload one object per job, and nothing else. Unset means the worker
+    # endpoints refuse rather than open.
+    RENDER_WORKER_TOKEN = _opt("RENDER_WORKER_TOKEN")
+
     # ── Stripe ──────────────────────────────────────────────────────────────
     STRIPE_SECRET_KEY = _opt("STRIPE_SECRET_KEY")
     STRIPE_WEBHOOK_SECRET = _opt("STRIPE_WEBHOOK_SECRET")

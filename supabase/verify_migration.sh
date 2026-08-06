@@ -51,6 +51,34 @@ grant usage on schema auth to anon, authenticated;
 grant execute on function auth.uid() to anon, authenticated;
 grant usage on schema public to anon, authenticated;
 alter default privileges in schema public grant all on tables to anon, authenticated;
+
+-- Storage, enough of it to exercise the bucket policies. foldername must match
+-- Supabase's real behaviour — it returns every path segment *except* the
+-- filename — or the policy under test is not the policy that ships.
+create schema storage;
+create table storage.buckets (
+  id text primary key,
+  name text,
+  public boolean default false,
+  file_size_limit bigint,
+  allowed_mime_types text[]
+);
+create table storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets (id),
+  name text
+);
+alter table storage.objects enable row level security;
+create or replace function storage.foldername(name text) returns text[]
+language plpgsql immutable as $$
+declare parts text[];
+begin
+  parts := string_to_array(name, '/');
+  return parts[1:array_length(parts, 1) - 1];
+end $$;
+grant usage on schema storage to anon, authenticated;
+grant select, insert, update, delete on storage.objects to anon, authenticated;
+grant execute on function storage.foldername(text) to anon, authenticated;
 SQL
 
 for migration in "$MIGRATIONS"/*.sql; do
@@ -68,6 +96,15 @@ insert into public.businesses (id, user_id, name) values
 insert into public.campaigns (id, business_id, goal) values
  ('cccccccc-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000001','Alice goal'),
  ('dddddddd-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000002','Bob goal');
+insert into public.content_assets (id, campaign_id, type, format, content) values
+ ('eeeeeeee-0000-0000-0000-000000000001','cccccccc-0000-0000-0000-000000000001','social_post','b-roll-montage','{}'),
+ ('ffffffff-0000-0000-0000-000000000002','dddddddd-0000-0000-0000-000000000002','social_post','b-roll-montage','{}');
+insert into public.render_jobs (asset_id, campaign_id, format, aspect_ratio, prompt) values
+ ('eeeeeeee-0000-0000-0000-000000000001','cccccccc-0000-0000-0000-000000000001','b-roll-montage','9:16','{}'),
+ ('ffffffff-0000-0000-0000-000000000002','dddddddd-0000-0000-0000-000000000002','b-roll-montage','9:16','{}');
+insert into storage.objects (bucket_id, name) values
+ ('renders','cccccccc-0000-0000-0000-000000000001/alice.mp4'),
+ ('renders','dddddddd-0000-0000-0000-000000000002/bob.mp4');
 SQL
 
 # Each assertion raises if the property does not hold, so ON_ERROR_STOP fails
@@ -129,6 +166,35 @@ begin
     raise exception 'ESCALATION: refund_credit callable by authenticated';
   exception when insufficient_privilege then null;
   end;
+
+  -- render jobs: a user watches their own queue and nobody else's
+  select count(*) into n from public.render_jobs;
+  if n <> 1 then raise exception 'RLS leak: sees % render_jobs, expected 1', n; end if;
+
+  -- every render_jobs write goes through the API with the service role, so
+  -- there is deliberately no insert/update/delete policy
+  -- Note the different mechanism from profiles above. There the column GRANT
+  -- was revoked, so an update *raises*. Here the table simply has no UPDATE
+  -- policy, so RLS matches no rows and the statement succeeds having changed
+  -- nothing. Equally safe, but it has to be asserted on the row count — an
+  -- exception test passes vacuously and would keep passing if a permissive
+  -- policy were added later.
+  update public.render_jobs set status = 'done', video_path = 'anything';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'ESCALATION: user updated % render jobs', n; end if;
+  begin
+    insert into public.render_jobs (asset_id, campaign_id, format, aspect_ratio, prompt)
+    values ('eeeeeeee-0000-0000-0000-000000000001','cccccccc-0000-0000-0000-000000000001','x','9:16','{}');
+    raise exception 'ESCALATION: user queued their own render job';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- finished videos are scoped by the campaign id in the object path
+  select count(*) into n from storage.objects where bucket_id = 'renders';
+  if n <> 1 then raise exception 'sees % render objects, expected exactly Alice''s 1', n; end if;
+  select count(*) into n from storage.objects
+   where bucket_id = 'renders' and name like 'dddddddd%';
+  if n <> 0 then raise exception 'STORAGE LEAK: Bob''s render is visible to Alice'; end if;
 
   raise notice 'all assertions passed';
 end $$;

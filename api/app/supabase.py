@@ -129,3 +129,45 @@ def campaign_for_user(campaign_id: str, user_id: str) -> dict | None:
         },
     )
     return rows[0] if rows else None
+
+
+# ── Storage ─────────────────────────────────────────────────────────────────
+def _storage_url(path: str) -> str:
+    if not Config.SUPABASE_URL:
+        raise SupabaseError("SUPABASE_URL is not configured")
+    return f"{Config.SUPABASE_URL}/storage/v1/{path}"
+
+
+def signed_upload_url(bucket: str, path: str) -> dict:
+    """A one-shot URL the GPU worker can PUT a finished video to.
+
+    The worker is a rented box from an anonymous marketplace host, so it never
+    receives the service-role key — it gets a URL that can write exactly one
+    object and nothing else. Supabase rejects a second upload to the same path
+    unless it is explicitly upserted, so a replayed token cannot overwrite a
+    finished render either.
+    """
+    resp = requests.post(
+        _storage_url(f"object/upload/sign/{bucket}/{path}"),
+        headers=_headers(), json={}, timeout=TIMEOUT,
+    )
+    _check(resp)
+    body = resp.json()
+    return {
+        "path": path,
+        # Supabase returns a relative URL with the token already attached.
+        "url": f"{Config.SUPABASE_URL}/storage/v1{body['url']}"
+        if body.get("url", "").startswith("/") else body.get("url"),
+        "token": body.get("token"),
+    }
+
+
+def signed_download_url(bucket: str, path: str, expires_in: int = 3600) -> str:
+    """A time-limited read URL, so a leaked object path is not a leaked video."""
+    resp = requests.post(
+        _storage_url(f"object/sign/{bucket}/{path}"),
+        headers=_headers(), json={"expiresIn": expires_in}, timeout=TIMEOUT,
+    )
+    _check(resp)
+    signed = resp.json().get("signedURL", "")
+    return f"{Config.SUPABASE_URL}/storage/v1{signed}" if signed.startswith("/") else signed

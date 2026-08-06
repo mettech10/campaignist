@@ -832,3 +832,157 @@ def _template_keys(template: str) -> set:
     import string
 
     return {f for _, f, _, _ in string.Formatter().parse(template) if f}
+
+
+# ── GPU render queue ────────────────────────────────────────────────────────
+def test_worker_endpoints_fail_closed_when_no_token_is_configured(client, monkeypatch):
+    """An unset RENDER_WORKER_TOKEN must not mean an open queue. These routes
+    are public and the worker is the only caller, so the failure mode of a
+    missed env var has to be refusal, not anonymous access."""
+    from app.routes import renders
+
+    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "")
+    resp = client.post("/api/worker/claim",
+                       headers={"Authorization": "Bearer anything", "X-Worker-Id": "w1"})
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "worker_auth_unconfigured"
+
+
+def test_a_wrong_worker_token_is_rejected(client, monkeypatch):
+    from app.routes import renders
+
+    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "correct-horse")
+    for header in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": "correct-horse"}):
+        resp = client.post("/api/worker/claim", headers={**header, "X-Worker-Id": "w1"})
+        assert resp.status_code == 401, header
+
+
+def test_a_worker_must_identify_itself(client, monkeypatch):
+    """Leases are held by a named worker. Without an id there is nobody to scope
+    a heartbeat to, so two boxes could hand the same job back and forth."""
+    from app.routes import renders
+
+    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "correct-horse")
+    resp = client.post("/api/worker/claim", headers={"Authorization": "Bearer correct-horse"})
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "missing_worker_id"
+
+
+def test_a_worker_cannot_point_a_job_at_another_tenants_video(client, monkeypatch):
+    """The worker names its own upload path. Unchecked, it could finish a job
+    against any object in the bucket and the owner would be served someone
+    else's video through a URL we signed."""
+    from app.routes import renders
+
+    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "correct-horse")
+    completed = []
+    monkeypatch.setattr(renders.render_queue, "complete",
+                        lambda *a: completed.append(a) or {"id": "j1"})
+
+    headers = {"Authorization": "Bearer correct-horse", "X-Worker-Id": "w1"}
+    for path in ("../other-campaign/j1.mp4",
+                 "some-campaign/nested/j1.mp4",
+                 "other-campaign/someone-elses.mp4"):
+        resp = client.post("/api/worker/jobs/j1/complete", headers=headers,
+                           json={"video_path": path})
+        assert resp.status_code == 400, path
+    assert completed == [], "a bad path reached the queue"
+
+    resp = client.post("/api/worker/jobs/j1/complete", headers=headers,
+                       json={"video_path": "campaign-abc/j1.mp4"})
+    assert resp.status_code == 200
+
+
+def test_a_heartbeat_from_the_wrong_worker_does_not_steal_the_lease(monkeypatch):
+    """If a job was reaped and re-claimed while the first worker was busy, its
+    next beat must not take it back — and it has to hear that it lost."""
+    from app import render_queue
+
+    seen = {}
+
+    def fake_update(table, patch, *, params, **kw):
+        seen["params"] = params
+        # PostgREST matches nothing when claimed_by does not agree.
+        return [] if params.get("claimed_by") != "eq.owner" else [{"id": "j1"}]
+
+    monkeypatch.setattr(render_queue.supabase, "update", fake_update)
+
+    assert render_queue.heartbeat("j1", "owner") is True
+    assert render_queue.heartbeat("j1", "impostor") is False
+    assert seen["params"]["status"] == "eq.claimed"
+
+
+def test_an_abandoned_lease_goes_back_on_the_queue(monkeypatch):
+    """A Vast instance is interruptible — that is why it is £1.8/day. It cannot
+    tell us it died, so nothing else will ever move this row."""
+    from datetime import datetime, timedelta, timezone
+
+    from app import render_queue
+
+    now = datetime.now(timezone.utc)
+    dead = (now - timedelta(minutes=30)).isoformat()
+    alive = (now - timedelta(seconds=10)).isoformat()
+
+    patches = []
+    monkeypatch.setattr(render_queue.supabase, "select", lambda t, **kw: [
+        {"id": "dead", "attempts": 0, "progress_at": dead, "claimed_by": "w1"},
+        {"id": "alive", "attempts": 0, "progress_at": alive, "claimed_by": "w2"},
+    ])
+    monkeypatch.setattr(render_queue.supabase, "update",
+                        lambda t, patch, **kw: patches.append((kw["params"]["id"], patch))
+                        or [{"id": "x"}])
+
+    assert render_queue.reap(now=now) == 1
+    assert len(patches) == 1
+    job_id, patch = patches[0]
+    assert job_id == "eq.dead", "a worker that is still beating lost its job"
+    assert patch["status"] == "queued"
+    assert patch["attempts"] == 1
+    assert patch["claimed_by"] is None
+
+
+def test_a_render_that_keeps_dying_is_eventually_called_dead(monkeypatch):
+    """Otherwise an asset that always OOMs cycles through the queue forever,
+    burning GPU time that is being paid for by the hour."""
+    from datetime import datetime, timedelta, timezone
+
+    from app import render_queue
+
+    now = datetime.now(timezone.utc)
+    patches = []
+    monkeypatch.setattr(render_queue.supabase, "select", lambda t, **kw: [{
+        "id": "j1", "attempts": render_queue.MAX_ATTEMPTS - 1,
+        "progress_at": (now - timedelta(hours=1)).isoformat(), "claimed_by": "w1",
+    }])
+    monkeypatch.setattr(render_queue.supabase, "update",
+                        lambda t, patch, **kw: patches.append(patch) or [{"id": "j1"}])
+
+    render_queue.reap(now=now)
+    assert patches[0]["status"] == "error"
+
+
+def test_only_video_assets_are_queued_and_never_twice(monkeypatch):
+    """Re-rendering an asset should replace its video, not queue a second render
+    beside the first and race it to the same upload path."""
+    from app import render_queue
+
+    inserted = []
+    monkeypatch.setattr(render_queue.supabase, "insert",
+                        lambda t, rows: inserted.extend(rows) or rows)
+
+    def fake_select(table, *, params=None, **kw):
+        if table == "content_assets":
+            return [
+                {"id": "a1", "format": "b-roll-montage", "content": {}, "image_brief": "b"},
+                {"id": "a2", "format": "quote-card", "content": {}, "image_brief": "b"},
+                {"id": "a3", "format": "long-form-email", "content": {}, "image_brief": ""},
+                {"id": "a4", "format": "ugc-testimonial", "content": {}, "image_brief": "b"},
+            ]
+        return [{"asset_id": "a4"}]  # already queued
+
+    monkeypatch.setattr(render_queue.supabase, "select", fake_select)
+
+    render_queue.enqueue_campaign("c1")
+    queued = {row["asset_id"] for row in inserted}
+    assert queued == {"a1"}, f"queued {queued}: expected only the un-queued video asset"
+    assert inserted[0]["aspect_ratio"] == "9:16"
