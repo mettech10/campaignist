@@ -163,6 +163,15 @@ Carried over from the original plan — don't drop this in the pivot.
 - **JSON output contracts, validated.** Every agent call returns schema-validated
   JSON. Retry once on validation failure, then fail loud with a stored reason —
   never fail silent.
+- **Ask for JSON in the prompt as well as the parameter.** Moonshot treats
+  `response_format` as a strong hint, not a hard constraint. Every prompt in
+  `specs/` is written in Markdown and, for a long time, none of them mentioned
+  JSON at all — so when the words and the parameter disagreed, the words won.
+  Three agents returned handsome Markdown documents using the schema's field
+  names as **bold** headings; the Strategy agent did it on all three attempts,
+  so retries did not cover it. `agents.OUTPUT_CONTRACT` is appended to every
+  system prompt centrally, and after it 23 consecutive calls came back clean.
+  A model that silently ignores the schema does not degrade — it loses the call.
 - **Log every agent action and every tool call it makes**, especially ones that
   edit content — this is how you debug "why did the Email Agent do that."
 - **Verify before moving to the next piece.** Read actual agent output yourself.
