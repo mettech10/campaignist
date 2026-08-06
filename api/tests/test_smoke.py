@@ -227,7 +227,7 @@ def test_roles_can_sit_on_different_providers(monkeypatch):
     from app.pipeline.llm import resolve_role
 
     monkeypatch.setattr(Config, "MODEL_STRATEGY", "claude-sonnet-5")
-    monkeypatch.setattr(Config, "MODEL_CONTENT", "kimi-k2.5")
+    monkeypatch.setattr(Config, "MODEL_CONTENT", "kimi-k2.6")
     assert resolve_role("strategy").provider == "anthropic"
     assert resolve_role("content").provider == "kimi"
 
@@ -413,9 +413,9 @@ def test_temperature_is_omitted_for_models_that_fix_it(monkeypatch):
     assert seen["temperature"] is None, "kimi-k3 must not be sent a temperature"
 
     # Every Moonshot model fixes it, so no Kimi role may be sent one.
-    monkeypatch.setattr(llm.Config, "MODEL_CONTENT", "kimi-k2.5")
+    monkeypatch.setattr(llm.Config, "MODEL_CONTENT", "kimi-k2.6")
     llm.call_json(role="content", system="s", user="u", schema={})
-    assert seen["temperature"] is None, "kimi-k2.5 must not be sent a temperature"
+    assert seen["temperature"] is None, "kimi-k2.6 must not be sent a temperature"
 
 
 def test_none_temperature_is_not_sent_to_the_api(monkeypatch):
@@ -761,3 +761,33 @@ def test_a_json_failure_reports_what_came_back():
     with pytest.raises(providers.ProviderError) as excinfo:
         providers.parse_json("   ", "kimi-k2.5")
     assert "<empty>" in str(excinfo.value)
+
+
+def test_a_role_cannot_be_pointed_at_a_model_that_ignores_the_schema(monkeypatch):
+    """kimi-k2.5 sat in MODELS under a comment claiming every entry was
+    confirmed to honour strict JSON Schema. It was never checked, and it
+    answered 6 of 10 fan-out legs in Markdown — assets written, then dropped.
+    The claim is now enforced rather than asserted in a comment."""
+    from app.pipeline import llm
+
+    # Patch llm.Config, not app.config.Config. A test above reloads the config
+    # module, which mints a fresh Config class; llm still holds a reference to
+    # the original, so patching the module attribute patches an object the code
+    # under test never reads.
+    monkeypatch.setattr(llm.Config, "MODEL_CONTENT", "kimi-k2.5")
+    with pytest.raises(llm.LLMError) as excinfo:
+        llm.resolve_role("content")
+
+    message = str(excinfo.value)
+    assert "MODEL_CONTENT" in message, "the error must name the var to change"
+    assert "kimi-k2.6" in message, "the error must name a model that works"
+
+
+def test_every_default_role_model_honours_the_schema():
+    """The shipped defaults must work out of the box — an operator who sets no
+    model env vars at all should not silently lose their creative assets."""
+    from app.pipeline import llm
+
+    for role in ("strategy", "content"):
+        resolved = llm.resolve_role(role)
+        assert llm.MODELS[resolved.model].honours_schema

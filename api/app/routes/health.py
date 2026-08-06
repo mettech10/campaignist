@@ -19,6 +19,9 @@ def health():
                 "model": resolved.model,
                 "provider": resolved.provider,
                 "key_present": bool(_provider_key(resolved.provider)),
+                # A model that ignores the schema loses calls outright rather
+                # than degrading, so this is worth reading off a live deploy.
+                "honours_schema": llm.MODELS[resolved.model].honours_schema,
             }
         except Exception as e:
             roles[role] = {"error": str(e)}

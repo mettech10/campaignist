@@ -59,17 +59,30 @@ class ModelSpec:
     # thinking models, which cost a live run to discover. When False the
     # parameter is omitted entirely and the provider's own default applies.
     supports_temperature: bool = True
+    # Whether the model actually returns what `response_format: json_schema`
+    # asks for. The pipeline has no repair path, so a model that ignores the
+    # schema does not degrade — it loses the call outright.
+    honours_schema: bool = True
 
 
-# Every entry here is a model confirmed to honour strict JSON Schema output.
-# Adding one without checking that breaks the no-repair-path assumption.
+# Every entry here must be a model *confirmed* to honour strict JSON Schema
+# output, because the pipeline has no repair path. That invariant was written
+# down here from the start and then not actually checked for kimi-k2.5, which
+# is the whole reason honours_schema now exists as a field rather than a
+# comment: an unverified claim in a comment costs nothing to write and
+# everything to trust.
 #
 # Deliberately absent: moonshot-v1-* (predates strict schema support).
 MODELS: dict[str, ModelSpec] = {
     # Kimi / Moonshot AI
     "kimi-k3":                  ModelSpec("kimi", 3.00, 15.00, 0.30, supports_temperature=False),
     "kimi-k2.6":                ModelSpec("kimi", 0.95, 4.00, 0.16, supports_temperature=False),
-    "kimi-k2.5":                ModelSpec("kimi", 0.60, 3.00, 0.10, supports_temperature=False),
+    # Ignores response_format and answers in Markdown prose. Measured over one
+    # campaign's fan-out: 4 of 10 legs came back as JSON, the other 6 as
+    # "**Variant 1**\n\n..." — well written, wrong shape, silently dropped.
+    # Partial compliance is worse than none; it looks like it works.
+    "kimi-k2.5":                ModelSpec("kimi", 0.60, 3.00, 0.10, supports_temperature=False,
+                                          honours_schema=False),
     "kimi-k2.7-code":           ModelSpec("kimi", 1.20, 5.00, 0.19, supports_temperature=False),
     "kimi-k2.7-code-highspeed": ModelSpec("kimi", 1.20, 5.00, 0.19, supports_temperature=False),
     # Anthropic
@@ -96,6 +109,14 @@ def resolve_role(role: str) -> RoleConfig:
             f"The pipeline has no JSON-repair path, so add it to llm.MODELS only "
             f"after confirming it enforces a strict JSON Schema. "
             f"Known: {', '.join(sorted(MODELS))}"
+        )
+    if not spec.honours_schema:
+        raise LLMError(
+            f"{model!r} is configured for role {role!r}, but it does not "
+            f"reliably honour a strict JSON Schema — it answers in prose often "
+            f"enough that calls are lost rather than degraded. Point "
+            f"MODEL_{role.upper()} at one of: "
+            f"{', '.join(sorted(m for m, s in MODELS.items() if s.honours_schema))}"
         )
     return RoleConfig(role=role, model=model, provider=spec.provider)
 

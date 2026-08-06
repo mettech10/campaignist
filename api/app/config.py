@@ -60,7 +60,9 @@ class Config:
     # The blueprint's split: a strong model for strategy, a cheap one for the
     # content fan-out.
     MODEL_STRATEGY = _opt("MODEL_STRATEGY", "kimi-k2.6")
-    MODEL_CONTENT = _opt("MODEL_CONTENT", "kimi-k2.5")
+    # Was kimi-k2.5, which is cheaper and ignores the JSON schema often enough
+    # to lose most of a campaign's creative assets. See llm.MODELS.
+    MODEL_CONTENT = _opt("MODEL_CONTENT", "kimi-k2.6")
 
     # Temperature applies to OpenAI-compatible providers. Anthropic's current
     # models reject sampling parameters, so it is not sent there.
