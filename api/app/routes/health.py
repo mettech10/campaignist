@@ -41,6 +41,11 @@ def health():
         # Which scheme incoming tokens will be verified under.
         jwt_verification="HS256 (shared secret)" if Config.SUPABASE_JWT_SECRET
         else "JWKS (asymmetric)",
+        # A wrong CORS list presents to the user as "Failed to fetch" with no
+        # server-side trace at all — the browser blocks the request before it
+        # is sent. Showing the allowed origins makes that one lookup instead of
+        # a guessing game. Origins are public by definition.
+        cors_origins=Config.CORS_ORIGINS,
     )
 
 
