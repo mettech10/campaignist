@@ -45,7 +45,7 @@ what makes a bake-off an env change rather than a refactor.
 
 | Role | Default | Price /MTok | Used by |
 |---|---|---|---|
-| `MODEL_STRATEGY` | `kimi-k3` | $3.00 / $15.00 | Steps 1, 2, 3, 5, and written formats in step 4 |
+| `MODEL_STRATEGY` | `kimi-k2.6` | $0.95 / $4.00 | Steps 1, 2, 3, 5, and written formats in step 4 |
 | `MODEL_CONTENT` | `kimi-k2.5` | $0.60 / $3.00 | The step 4 content fan-out |
 
 Two adapters cover the field (`api/app/pipeline/providers.py`):

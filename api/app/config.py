@@ -59,7 +59,7 @@ class Config:
     #
     # The blueprint's split: a strong model for strategy, a cheap one for the
     # content fan-out.
-    MODEL_STRATEGY = _opt("MODEL_STRATEGY", "kimi-k3")
+    MODEL_STRATEGY = _opt("MODEL_STRATEGY", "kimi-k2.6")
     MODEL_CONTENT = _opt("MODEL_CONTENT", "kimi-k2.5")
 
     # Temperature applies to OpenAI-compatible providers. Anthropic's current
