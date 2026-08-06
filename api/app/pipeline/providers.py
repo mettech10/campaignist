@@ -182,4 +182,10 @@ def parse_json(text: str, model: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
-        raise ProviderError(f"{model}: response was not valid JSON: {e}") from e
+        # Include what came back. "Expecting value: line 1 column 1" on its own
+        # cannot distinguish an empty body from prose from a truncated object,
+        # and those want different fixes.
+        snippet = (text or "")[:200].strip() or "<empty>"
+        raise ProviderError(
+            f"{model}: response was not valid JSON ({e}); got: {snippet!r}"
+        ) from e

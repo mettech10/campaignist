@@ -165,7 +165,7 @@ def call_json(
         except ProviderError as e:
             # Truncation, refusals and 4xx are deterministic — retrying just
             # burns money and time. Only transport-shaped failures get a retry.
-            budget = TIMEOUT_RETRIES if _is_timeout(e) else RETRIES
+            budget = TIMEOUT_RETRIES if _gets_short_budget(e) else RETRIES
             if not _is_transient(e) or attempt >= budget:
                 raise
             last_error = e
@@ -190,8 +190,31 @@ def _is_timeout(e: Exception) -> bool:
     return "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower()
 
 
+def _gets_short_budget(e: Exception) -> bool:
+    """Failures where a second identical attempt is the whole of the hope.
+
+    Both a timeout and an unparseable body say the request was fine and the
+    response was not. One more go is worth it; a third rarely is.
+    """
+    return _is_timeout(e) or "not valid json" in str(e).lower()
+
+
 def _is_transient(e: Exception) -> bool:
+    """Is this worth another attempt at all?
+
+    Truncation and refusals are properties of the request: the same prompt hits
+    the same ceiling and earns the same refusal, so retrying only costs money.
+
+    An unparseable body used to be lumped in with those, on the reasoning that a
+    schema-constrained call either conforms or does not. A live run disproved
+    it: three of eight fan-out legs came back unparseable on kimi-k2.5 and were
+    dropped on the spot, losing a third of the creative assets to what is
+    plainly a flaky generation rather than a bad request. It gets the short
+    retry budget — see TIMEOUT_RETRIES — for the same reason a timeout does.
+    """
     text = str(e).lower()
-    if "max_tokens" in text or "declined" in text or "not valid json" in text:
+    if "max_tokens" in text or "declined" in text:
         return False
+    if "not valid json" in text:
+        return True
     return any(code in text for code in ("429", "500", "502", "503", "529", "timeout", "connection"))

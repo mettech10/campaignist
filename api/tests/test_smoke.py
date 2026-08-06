@@ -718,3 +718,46 @@ def test_timeouts_get_a_shorter_retry_budget_than_other_transients(
         llm.call_json(role="strategy", system="s", user="u", schema={})
 
     assert len(attempts) == expected_attempts
+
+
+def test_an_unparseable_body_is_retried_but_a_bad_request_is_not(monkeypatch):
+    """A live run lost three of eight fan-out legs to unparseable responses that
+    were classified as deterministic and dropped without a second attempt."""
+    from app.pipeline import llm, providers
+
+    cases = {
+        # Response-shaped failure: worth exactly one more go.
+        "kimi-k2.5: response was not valid JSON (Expecting value); got: '<empty>'": 2,
+        # Request-shaped failures: the same prompt earns the same answer.
+        "kimi-k2.5: hit max_tokens (16000) — output truncated": 1,
+        "kimi-k2.5 declined the request (policy)": 1,
+    }
+
+    for message, expected in cases.items():
+        attempts = []
+
+        def fake_dispatch(resolved, **kw):
+            attempts.append(1)
+            raise providers.ProviderError(message)
+
+        monkeypatch.setattr(llm, "_dispatch", fake_dispatch)
+        monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+
+        with pytest.raises(llm.LLMError):
+            llm.call_json(role="content", system="s", user="u", schema={})
+
+        assert len(attempts) == expected, f"{message!r} made {len(attempts)} attempts"
+
+
+def test_a_json_failure_reports_what_came_back():
+    """'Expecting value: line 1 column 1' alone cannot tell an empty body from
+    prose from a truncated object, and those want different fixes."""
+    from app.pipeline import providers
+
+    with pytest.raises(providers.ProviderError) as excinfo:
+        providers.parse_json("I'd be happy to help with that!", "kimi-k2.5")
+    assert "I'd be happy to help" in str(excinfo.value)
+
+    with pytest.raises(providers.ProviderError) as excinfo:
+        providers.parse_json("   ", "kimi-k2.5")
+    assert "<empty>" in str(excinfo.value)
