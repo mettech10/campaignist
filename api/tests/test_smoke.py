@@ -509,3 +509,56 @@ def test_supabase_url_is_normalised_to_its_origin():
     ):
         assert _project_origin(raw) == want, raw
     assert _project_origin("") == ""
+
+
+def test_temperature_is_omitted_for_models_that_fix_it(monkeypatch):
+    """kimi-k3 has always-on thinking and 400s on any temperature but 1."""
+    from app.pipeline import llm, providers
+
+    seen = {}
+
+    def fake(**kwargs):
+        seen.update(kwargs)
+        return providers.Completion(text="{}", input_tokens=1, output_tokens=1, cached_tokens=0)
+
+    monkeypatch.setattr(providers, "call_openai_compatible", fake)
+    monkeypatch.setattr(
+        llm.Config, "openai_compatible_credentials",
+        classmethod(lambda cls, p: ("k", "https://x/v1")),
+    )
+
+    monkeypatch.setattr(llm.Config, "MODEL_STRATEGY", "kimi-k3")
+    llm.call_json(role="strategy", system="s", user="u", schema={})
+    assert seen["temperature"] is None, "kimi-k3 must not be sent a temperature"
+
+    monkeypatch.setattr(llm.Config, "MODEL_CONTENT", "kimi-k2.5")
+    monkeypatch.setattr(llm.Config, "LLM_TEMPERATURE", 0.6)
+    llm.call_json(role="content", system="s", user="u", schema={})
+    assert seen["temperature"] == 0.6, "kimi-k2.5 should still get a temperature"
+
+
+def test_none_temperature_is_not_sent_to_the_api(monkeypatch):
+    from app.pipeline import providers
+
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return type("R", (), {
+                "choices": [type("C", (), {
+                    "finish_reason": "stop",
+                    "message": type("M", (), {"content": "{}"})()})()],
+                "usage": type("U", (), {"prompt_tokens": 1, "completion_tokens": 1,
+                                        "prompt_tokens_details": None})(),
+            })()
+
+    monkeypatch.setattr(
+        providers, "_openai_client",
+        lambda k, b: type("C", (), {"chat": type("Ch", (), {"completions": FakeCompletions()})()})(),
+    )
+    providers.call_openai_compatible(
+        api_key="k", base_url="b", model="kimi-k3", system="s", user="u",
+        schema={}, schema_name="n", max_tokens=100, temperature=None,
+    )
+    assert "temperature" not in captured

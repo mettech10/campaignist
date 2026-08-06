@@ -53,16 +53,18 @@ def _openai_client(api_key: str, base_url: str):
 
 def call_openai_compatible(
     *, api_key: str, base_url: str, model: str, system: str, user: str,
-    schema: dict, schema_name: str, max_tokens: int, temperature: float,
+    schema: dict, schema_name: str, max_tokens: int, temperature: float | None,
 ) -> Completion:
     import openai
 
     client = _openai_client(api_key, base_url)
+    # temperature=None means the model fixes it; sending any value is a 400.
+    optional = {} if temperature is None else {"temperature": temperature}
     try:
         response = client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
-            temperature=temperature,
+            **optional,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

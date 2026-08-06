@@ -36,6 +36,10 @@ class ModelSpec:
     input_usd: float         # per million tokens
     output_usd: float
     cached_usd: float = 0.0  # discounted rate for cache hits, where offered
+    # Reasoning models with always-on thinking fix the sampling temperature and
+    # reject any other value with a 400. When False the parameter is omitted
+    # entirely and the provider's own default applies.
+    supports_temperature: bool = True
 
 
 # Every entry here is a model confirmed to honour strict JSON Schema output.
@@ -44,7 +48,7 @@ class ModelSpec:
 # Deliberately absent: moonshot-v1-* (predates strict schema support).
 MODELS: dict[str, ModelSpec] = {
     # Kimi / Moonshot AI
-    "kimi-k3":                  ModelSpec("kimi", 3.00, 15.00, 0.30),
+    "kimi-k3":                  ModelSpec("kimi", 3.00, 15.00, 0.30, supports_temperature=False),
     "kimi-k2.7-code":           ModelSpec("kimi", 1.20, 5.00, 0.19),
     "kimi-k2.7-code-highspeed": ModelSpec("kimi", 1.20, 5.00, 0.19),
     "kimi-k2.6":                ModelSpec("kimi", 0.95, 4.00, 0.16),
@@ -99,11 +103,12 @@ def _dispatch(role: RoleConfig, **kw) -> providers.Completion:
             **kw,
         )
     api_key, base_url = Config.openai_compatible_credentials(role.provider)
+    spec = MODELS[role.model]
     return providers.call_openai_compatible(
         api_key=api_key,
         base_url=base_url,
         model=role.model,
-        temperature=Config.LLM_TEMPERATURE,
+        temperature=Config.LLM_TEMPERATURE if spec.supports_temperature else None,
         **kw,
     )
 
