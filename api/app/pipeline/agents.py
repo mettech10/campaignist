@@ -108,6 +108,25 @@ def ordered() -> list[AgentSpec]:
     return [spec for stage in stages() for spec in stage]
 
 
+# Appended to every agent's system prompt.
+#
+# Moonshot treats response_format as a strong hint, not a hard constraint. Every
+# prompt in specs/ is written in Markdown, and not one of them mentions JSON, a
+# schema, or an output shape — the only signal was the API parameter. When the
+# words and the parameter disagree, the words win: the model returns a nicely
+# formatted document using the schema's field names as **bold** headings.
+# Observed on copy_social, email and strategy, on both k2.5 and k2.6, and
+# strategy once missed on all three attempts, so retries alone do not cover it.
+#
+# This lives here rather than in each spec so a new agent cannot forget it.
+OUTPUT_CONTRACT = (
+    "Return one JSON object conforming to the supplied schema, and nothing "
+    "else. No Markdown, no headings, no bold, no code fences, and no "
+    "commentary before or after it. The names in the schema are keys, not "
+    "section titles."
+)
+
+
 def run(spec: AgentSpec, variables: dict, *, max_tokens: int | None = None) -> tuple[dict, float]:
     """Render an agent's prompt and make its one schema-constrained call.
 
@@ -122,7 +141,7 @@ def run(spec: AgentSpec, variables: dict, *, max_tokens: int | None = None) -> t
     kwargs = {"max_tokens": max_tokens} if max_tokens else {}
     output, cost, resolved = call_json(
         role=spec.role,
-        system=spec.system,
+        system=f"{spec.system}\n\n{OUTPUT_CONTRACT}",
         user=user,
         schema=spec.schema,
         schema_name=spec.id,

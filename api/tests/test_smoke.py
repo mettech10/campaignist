@@ -803,27 +803,32 @@ def test_every_default_role_model_honours_the_schema():
         assert llm.MODELS[resolved.model].honours_schema
 
 
-def test_no_agent_is_told_to_write_prose():
-    """Every agent returns a JSON object, and Moonshot enforces that softly
-    enough that the prompt's own register decides the outcome.
 
-    Two agents closed on "Write a three-email nurture sequence" / "Write N
-    distinct variants" — and those two were the only ones that ever came back
-    as Markdown, echoing the prompt's `backticks` and **bold** back. The five
-    that close on "Produce"/"Assemble" have never missed. Verbs that name a
-    document invite one.
-    """
-    import glob
-    import json
 
-    banned = ("write", "draft", "compose")
-    for path in sorted(glob.glob("app/pipeline/specs/*.json")):
-        spec = json.loads(open(path).read())
-        closing = [
-            line for line in spec["user_template"].strip().splitlines() if line.strip()
-        ][-1]
-        first_word = closing.strip().split()[0].lower()
-        assert first_word not in banned, (
-            f"{path} closes with {first_word!r}: ask an agent to produce its "
-            f"output, not to write a document, or it will write one"
-        )
+def test_every_agent_is_told_to_return_json(monkeypatch):
+    """No prompt in specs/ mentions JSON, a schema, or an output shape — the
+    only signal was the response_format parameter, which Moonshot treats as a
+    hint. Three agents came back as Markdown documents using the schema's field
+    names as headings, strategy on all three attempts. The contract is appended
+    centrally so a new spec cannot forget it."""
+    from app.pipeline import agents
+
+    seen = {}
+
+    def fake_call_json(*, role, system, user, schema, schema_name, **kw):
+        seen["system"] = system
+        return {}, 0.0, type("R", (), {"provider": "kimi", "model": "kimi-k2.6"})()
+
+    monkeypatch.setattr(agents, "call_json", fake_call_json)
+
+    spec = agents.registry()["strategy"]
+    agents.run(spec, {k: "" for k in _template_keys(spec.user_template)})
+
+    assert agents.OUTPUT_CONTRACT in seen["system"]
+    assert spec.system in seen["system"], "the agent's own prompt must survive"
+
+
+def _template_keys(template: str) -> set:
+    import string
+
+    return {f for _, f, _, _ in string.Formatter().parse(template) if f}
