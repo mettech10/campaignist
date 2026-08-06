@@ -443,3 +443,50 @@ def test_cost_accounts_for_cached_input_tokens():
     c = Completion(text="", input_tokens=1_000_000, output_tokens=0, cached_tokens=900_000)
     # 100k fresh at $3.00/M + 900k cached at $0.30/M
     assert cost_gbp("kimi-k3", c) == pytest.approx((0.1 * 3.00 + 0.9 * 0.30) * 0.79)
+
+
+# ── JWT algorithm selection ─────────────────────────────────────────────────
+
+def test_algorithm_comes_from_the_token_not_the_config(monkeypatch):
+    """A leftover SUPABASE_JWT_SECRET must not force the HS256 path and reject
+    the asymmetric tokens Supabase actually issues."""
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from app import auth
+    from app.config import Config
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    token = pyjwt.encode(
+        {"sub": "user-1", "aud": "authenticated"}, key, algorithm="ES256"
+    )
+
+    # A secret is set, but the token is ES256 — the JWKS path must still be taken.
+    monkeypatch.setattr(Config, "SUPABASE_JWT_SECRET", "a-leftover-hs256-secret")
+    monkeypatch.setattr(
+        auth, "_jwks",
+        lambda: type("J", (), {"get_signing_key_from_jwt":
+                               staticmethod(lambda _t: type("K", (), {"key": key.public_key()}))})(),
+    )
+    assert auth.verify_token(token)["sub"] == "user-1"
+
+
+def test_hs256_token_still_verifies_with_the_secret(monkeypatch):
+    import jwt as pyjwt
+
+    from app import auth
+    from app.config import Config
+
+    monkeypatch.setattr(Config, "SUPABASE_JWT_SECRET", "shhh")
+    token = pyjwt.encode({"sub": "u", "aud": "authenticated"}, "shhh", algorithm="HS256")
+    assert auth.verify_token(token)["sub"] == "u"
+
+
+def test_unsigned_token_is_refused(monkeypatch):
+    import jwt as pyjwt
+
+    from app import auth
+
+    token = pyjwt.encode({"sub": "attacker", "aud": "authenticated"}, key=None, algorithm="none")
+    with pytest.raises(pyjwt.InvalidTokenError, match="unsupported token algorithm"):
+        auth.verify_token(token)

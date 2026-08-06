@@ -33,21 +33,40 @@ def _jwks() -> PyJWKClient:
 
 
 def verify_token(token: str) -> dict:
-    """Return the decoded claims, or raise jwt.PyJWTError."""
-    if Config.SUPABASE_JWT_SECRET:
+    """Return the decoded claims, or raise jwt.PyJWTError.
+
+    The signing scheme is chosen from the token's own header, not from whether
+    SUPABASE_JWT_SECRET happens to be set. Branching on config meant that a
+    leftover secret in the environment forced the HS256 path and rejected every
+    asymmetric token the project actually issues — a silent, total auth outage
+    caused by an unused variable.
+    """
+    alg = jwt.get_unverified_header(token).get("alg", "")
+
+    if alg == "HS256":
+        if not Config.SUPABASE_JWT_SECRET:
+            raise jwt.InvalidTokenError(
+                "token is HS256 but SUPABASE_JWT_SECRET is not configured"
+            )
         return jwt.decode(
             token,
             Config.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
             audience="authenticated",
         )
-    signing_key = _jwks().get_signing_key_from_jwt(token)
-    return jwt.decode(
-        token,
-        signing_key.key,
-        algorithms=["ES256", "RS256"],
-        audience="authenticated",
-    )
+
+    if alg in ("ES256", "RS256"):
+        signing_key = _jwks().get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=[alg],
+            audience="authenticated",
+        )
+
+    # Never trust an algorithm we did not explicitly plan for — "none" and
+    # friends are how JWT verification gets bypassed entirely.
+    raise jwt.InvalidTokenError(f"unsupported token algorithm: {alg!r}")
 
 
 def _bearer() -> str | None:
