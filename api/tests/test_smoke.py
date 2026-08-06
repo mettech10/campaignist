@@ -490,3 +490,22 @@ def test_unsigned_token_is_refused(monkeypatch):
     token = pyjwt.encode({"sub": "attacker", "aud": "authenticated"}, key=None, algorithm="none")
     with pytest.raises(pyjwt.InvalidTokenError, match="unsupported token algorithm"):
         auth.verify_token(token)
+
+
+def test_supabase_url_is_normalised_to_its_origin():
+    """Pasting the REST URL instead of the project URL made the JWKS endpoint
+    404/401, which rejected every valid token as invalid."""
+    from app.config import _project_origin
+
+    want = "https://abc.supabase.co"
+    for raw in (
+        "https://abc.supabase.co/rest/v1/",
+        "https://abc.supabase.co/rest/v1",
+        "https://abc.supabase.co/auth/v1",
+        "https://abc.supabase.co/",
+        "https://abc.supabase.co",
+        "  https://abc.supabase.co/rest/v1/  ",
+        "abc.supabase.co",
+    ):
+        assert _project_origin(raw) == want, raw
+    assert _project_origin("") == ""

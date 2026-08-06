@@ -1,5 +1,7 @@
 """Environment configuration. Fails loudly at boot on missing required vars."""
+import logging
 import os
+from urllib.parse import urlparse
 
 
 class ConfigError(RuntimeError):
@@ -17,9 +19,33 @@ def _opt(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
+def _project_origin(raw: str) -> str:
+    """Reduce a Supabase URL to its origin.
+
+    Supabase's dashboard shows several URLs — the project URL, the REST URL
+    (`.../rest/v1/`), the GraphQL one — and pasting the wrong one is easy. The
+    consequence is severe and unobvious: the JWKS URL becomes
+    `<project>/rest/v1/auth/v1/.well-known/jwks.json`, which returns 401, so key
+    fetch fails and *every* valid token is rejected as invalid. Normalising here
+    means the app works whichever URL was pasted.
+    """
+    raw = raw.strip().rstrip("/")
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "//" in raw else f"https://{raw}")
+    if not parsed.netloc:
+        return raw
+    if parsed.path:
+        logging.getLogger(__name__).warning(
+            "[config] SUPABASE_URL had a path (%r) — using the origin instead. "
+            "Set it to https://%s", parsed.path, parsed.netloc,
+        )
+    return f"{parsed.scheme or 'https'}://{parsed.netloc}"
+
+
 class Config:
     # ── Supabase ────────────────────────────────────────────────────────────
-    SUPABASE_URL = _opt("SUPABASE_URL").rstrip("/")
+    SUPABASE_URL = _project_origin(_opt("SUPABASE_URL"))
     # Service role: bypasses RLS. Never expose this to the browser.
     SUPABASE_SERVICE_KEY = _opt("SUPABASE_SERVICE_KEY")
     # Legacy HS256 verification. Unset when the project uses asymmetric JWTs,
