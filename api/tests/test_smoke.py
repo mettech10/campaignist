@@ -586,3 +586,95 @@ def test_a_partly_complete_run_keeps_the_charge(monkeypatch):
 
     runner._fail("c1", "boom")
     assert refunded == []
+
+
+def test_the_heartbeat_interval_stays_under_the_reaper_threshold():
+    """These two constants live in different modules and only work as a pair.
+    If the heartbeat ever ticks slower than the reaper reaps, every campaign
+    that runs long enough gets killed while it is working."""
+    from app.pipeline import orchestrator, reaper
+
+    assert orchestrator.HEARTBEAT_EVERY * 2 < reaper.STALE_AFTER
+
+
+def test_a_long_stage_keeps_reporting_progress(monkeypatch):
+    """The bug this covers: progress_at was only written when a stage finished,
+    so stage 3's four concurrent agents left it silent for the whole stage and
+    the reaper reclaimed a healthy run."""
+    import threading
+    from datetime import timedelta
+
+    from app.pipeline import orchestrator
+
+    beats = []
+    monkeypatch.setattr(orchestrator, "HEARTBEAT_EVERY", timedelta(seconds=0.01))
+    monkeypatch.setattr(orchestrator.supabase, "update",
+                        lambda table, patch, **kw: beats.append(patch))
+
+    with orchestrator._heartbeat("c1"):
+        # Stand in for a stage that writes nothing while it runs.
+        threading.Event().wait(0.15)
+
+    assert beats, "a long stage produced no heartbeat"
+    assert all(set(b) == {"progress_at"} for b in beats)
+
+    # And it must stop the moment the run is over, or a finished campaign would
+    # keep claiming to be alive.
+    settled = len(beats)
+    threading.Event().wait(0.1)
+    assert len(beats) == settled
+
+
+def test_the_heartbeat_gives_up_so_a_wedged_worker_is_still_reaped(monkeypatch):
+    """A beating heart proves the process is up, not that work is happening.
+    Past the deadline it must go quiet and let the reaper take over."""
+    import threading
+    from datetime import timedelta
+
+    from app.pipeline import orchestrator
+
+    beats = []
+    monkeypatch.setattr(orchestrator, "HEARTBEAT_EVERY", timedelta(seconds=0.01))
+    monkeypatch.setattr(orchestrator, "HEARTBEAT_DEADLINE", timedelta(seconds=0.05))
+    monkeypatch.setattr(orchestrator.supabase, "update",
+                        lambda table, patch, **kw: beats.append(patch))
+
+    with orchestrator._heartbeat("c1"):
+        threading.Event().wait(0.3)
+
+    assert 0 < len(beats) < 20, f"expected the heartbeat to stop early, got {len(beats)}"
+
+
+def test_model_calls_are_capped_however_deeply_the_pools_nest(monkeypatch):
+    """A stage runs its agents concurrently and the copy agent fans out inside
+    that, so pool sizes multiply. The cap has to hold regardless."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.pipeline import llm
+
+    peak, live, lock = 0, 0, threading.Lock()
+
+    def fake_dispatch(resolved, **kw):
+        nonlocal peak, live
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        threading.Event().wait(0.02)
+        with lock:
+            live -= 1
+        return type("C", (), {"text": "{}", "usage": None})()
+
+    monkeypatch.setattr(llm, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(llm.providers, "parse_json", lambda text, model: {})
+    monkeypatch.setattr(llm, "cost_gbp", lambda model, completion: 0.0)
+
+    def call():
+        return llm.call_json(role="content", system="s", user="u", schema={})
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for future in [pool.submit(call) for _ in range(16)]:
+            future.result()
+
+    assert peak <= llm.MAX_INFLIGHT, f"{peak} calls in flight, cap is {llm.MAX_INFLIGHT}"
+    assert peak > 1, "the cap serialised everything — concurrency is gone"

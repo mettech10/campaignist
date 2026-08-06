@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, jsonify
 
 from ..config import Config
-from ..pipeline import llm
+from ..pipeline import llm, orchestrator, reaper
 
 bp = Blueprint("health", __name__)
 
@@ -46,6 +46,16 @@ def health():
         # is sent. Showing the allowed origins makes that one lookup instead of
         # a guessing game. Origins are public by definition.
         cors_origins=Config.CORS_ORIGINS,
+        # The knobs that decide how long a run can take and how hard it leans on
+        # the provider. Both are tuned per instance size, and getting them wrong
+        # shows up as campaigns reaped mid-flight rather than as an error, so
+        # they are worth being able to read off a live deploy.
+        pipeline={
+            "max_inflight_calls": llm.MAX_INFLIGHT,
+            "attempts_per_call": llm.RETRIES + 1,
+            "heartbeat_seconds": orchestrator.HEARTBEAT_EVERY.total_seconds(),
+            "reaped_after_seconds": reaper.STALE_AFTER.total_seconds(),
+        },
     )
 
 

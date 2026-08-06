@@ -14,6 +14,8 @@ and the failure would surface far downstream.
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from dataclasses import dataclass
 
@@ -26,6 +28,17 @@ log = logging.getLogger(__name__)
 LLMError = ProviderError  # single error type for callers
 
 RETRIES = 2
+
+# Ceiling on model calls in flight across the whole process.
+#
+# The orchestrator nests pools: a stage runs its agents concurrently, and the
+# copy agent fans out over formats inside that. Those multiply — stage 3 peaked
+# at nine simultaneous calls on a 0.1-CPU instance, which is how you earn 429s
+# and turn a healthy stage into a retry storm. Capping here rather than shrinking
+# the pools keeps the concurrency structure intact and puts one predictable
+# number on the load, wherever the calls come from.
+MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "4"))
+_inflight = threading.Semaphore(MAX_INFLIGHT)
 MAX_TOKENS = 16000
 USD_TO_GBP = 0.79
 
@@ -133,14 +146,17 @@ def call_json(
     last_error: Exception | None = None
     for attempt in range(RETRIES + 1):
         try:
-            completion = _dispatch(
-                resolved,
-                system=system,
-                user=user,
-                schema=schema,
-                schema_name=schema_name,
-                max_tokens=max_tokens,
-            )
+            # Held only around the network call, so a thread waiting its turn
+            # is not also holding a slot.
+            with _inflight:
+                completion = _dispatch(
+                    resolved,
+                    system=system,
+                    user=user,
+                    schema=schema,
+                    schema_name=schema_name,
+                    max_tokens=max_tokens,
+                )
         except ProviderError as e:
             # Truncation, refusals and 4xx are deterministic — retrying just
             # burns money and time. Only transport-shaped failures get a retry.

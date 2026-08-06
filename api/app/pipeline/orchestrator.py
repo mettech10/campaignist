@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .. import supabase
 from . import agents, formats
@@ -28,6 +30,58 @@ log = logging.getLogger(__name__)
 
 VARIANTS_PER_FORMAT = 2
 MAX_WORKERS = 6
+
+# How often the run tells the reaper it is still alive, and the point past which
+# it stops claiming so. The interval must stay comfortably under
+# reaper.STALE_AFTER; the deadline is what stops a wedged-but-breathing worker
+# from holding a campaign open forever, since a heartbeat proves the process is
+# up, not that the work is progressing.
+HEARTBEAT_EVERY = timedelta(seconds=45)
+HEARTBEAT_DEADLINE = timedelta(minutes=25)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def _heartbeat(campaign_id: str):
+    """Keep `progress_at` fresh for as long as this block runs.
+
+    Stage 3 runs four agents at once and writes nothing until all four land, so
+    without this the heartbeat goes silent for the whole stage and the reaper
+    reclaims a campaign that is working perfectly. That is not hypothetical — it
+    is what killed the run measured at 1377s.
+
+    The thread is a daemon in the worker's own process, so if the worker dies
+    the beating stops with it and the reaper still does its job.
+    """
+    stop = threading.Event()
+    started = datetime.now(timezone.utc)
+
+    def beat() -> None:
+        while not stop.wait(HEARTBEAT_EVERY.total_seconds()):
+            if datetime.now(timezone.utc) - started > HEARTBEAT_DEADLINE:
+                log.error("[orchestrator] campaign %s past %s — no longer claiming "
+                          "liveness, leaving it to the reaper",
+                          campaign_id, HEARTBEAT_DEADLINE)
+                return
+            try:
+                supabase.update(
+                    "campaigns", {"progress_at": _now()},
+                    # Never resurrect a campaign that already failed or finished.
+                    params={"id": f"eq.{campaign_id}", "status": "eq.generating"},
+                    returning=False,
+                )
+            except Exception as e:
+                log.warning("[orchestrator] heartbeat for %s failed: %s", campaign_id, e)
+
+    thread = threading.Thread(target=beat, daemon=True, name=f"beat-{campaign_id[:8]}")
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
 
 
 @dataclass
@@ -204,17 +258,37 @@ def generate(campaign_id: str) -> None:
     # rather than duplicating.
     supabase.delete("content_assets", params={"campaign_id": f"eq.{campaign_id}"})
 
-    for stage in agents.stages():
-        pending = [s for s in stage if s.id not in ctx.outputs]
-        if not pending:
-            continue
+    def land(spec: AgentSpec, output: dict, cost: float, rows: list) -> None:
+        """Record one agent's result and write it straight through.
 
-        results: list[tuple[AgentSpec, dict, float, list]] = []
-        if len(pending) == 1:
-            spec = pending[0]
-            output, cost, rows = run_agent(spec, ctx)
-            results.append((spec, output, cost, rows))
-        else:
+        Persisting per agent rather than per stage is what makes the generation
+        view count up during stage 3 instead of sitting still for four agents,
+        and it means a worker that dies mid-stage keeps the agents that had
+        already finished.
+        """
+        ctx.outputs[spec.id] = output
+        ctx.cost_gbp += cost
+        if rows:
+            saved = supabase.insert("content_assets", rows)
+            ctx.assets.extend(saved if isinstance(saved, list) else [saved])
+        supabase.update(
+            "campaigns",
+            {"pipeline_outputs": ctx.outputs, "cost_gbp": round(ctx.cost_gbp, 4),
+             "progress_at": _now()},
+            params={"id": f"eq.{campaign_id}"}, returning=False,
+        )
+
+    with _heartbeat(campaign_id):
+        for stage in agents.stages():
+            pending = [s for s in stage if s.id not in ctx.outputs]
+            if not pending:
+                continue
+
+            if len(pending) == 1:
+                spec = pending[0]
+                land(spec, *run_agent(spec, ctx))
+                continue
+
             log.info("[orchestrator] stage %s running %d agents concurrently: %s",
                      pending[0].stage, len(pending), ", ".join(s.id for s in pending))
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -228,26 +302,7 @@ def generate(campaign_id: str) -> None:
                         log.warning("[orchestrator] agent %s failed: %s", spec.id, e)
                         ctx.outputs[spec.id] = {"error": str(e)[:400]}
                         continue
-                    results.append((spec, output, cost, rows))
-
-        new_rows = []
-        for spec, output, cost, rows in results:
-            ctx.outputs[spec.id] = output
-            ctx.cost_gbp += cost
-            new_rows.extend(rows)
-
-        if new_rows:
-            saved = supabase.insert("content_assets", new_rows)
-            ctx.assets.extend(saved if isinstance(saved, list) else [saved])
-
-        # progress_at is the reaper's heartbeat — without it a long stage looks
-        # identical to a dead worker.
-        supabase.update(
-            "campaigns",
-            {"pipeline_outputs": ctx.outputs, "cost_gbp": round(ctx.cost_gbp, 4),
-             "progress_at": datetime.now(timezone.utc).isoformat()},
-            params={"id": f"eq.{campaign_id}"}, returning=False,
-        )
+                    land(spec, output, cost, rows)
 
     assembly = ctx.outputs.get("assembly") or {}
     calendar = assembly.get("30_day_calendar")
@@ -267,7 +322,7 @@ def generate(campaign_id: str) -> None:
         "campaigns",
         {"status": "ready", "pipeline_outputs": ctx.outputs, "calendar": calendar,
          "cost_gbp": round(ctx.cost_gbp, 4), "error": None,
-         "progress_at": datetime.now(timezone.utc).isoformat()},
+         "progress_at": _now()},
         params={"id": f"eq.{campaign_id}"}, returning=False,
     )
     log.info("[orchestrator] campaign %s complete — £%.4f, %d assets",

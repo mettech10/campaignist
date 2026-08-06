@@ -46,7 +46,14 @@ def _openai_client(api_key: str, base_url: str):
     key = (api_key, base_url)
     if key not in _openai_clients:
         _openai_clients[key] = openai.OpenAI(
-            api_key=api_key, base_url=base_url, timeout=120.0
+            api_key=api_key, base_url=base_url, timeout=120.0,
+            # The SDK retries twice by default, and llm.call_json retries twice
+            # on top. Left alone those multiply: one agent could make nine
+            # 120-second attempts and sit there for eighteen minutes, which is
+            # long enough for the reaper to reclaim a campaign that is still
+            # working. llm.call_json is the single retry authority — it knows
+            # which failures are transient — so the SDK does not retry at all.
+            max_retries=0,
         )
     return _openai_clients[key]
 
@@ -109,7 +116,10 @@ def _anthropic(api_key: str):
                 "the anthropic package is not installed — "
                 "`pip install anthropic` to use an Anthropic-backed role"
             ) from e
-        _anthropic_client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+        # max_retries=0 for the same reason as the OpenAI client above.
+        _anthropic_client = anthropic.Anthropic(
+            api_key=api_key, timeout=120.0, max_retries=0
+        )
     return _anthropic_client
 
 
