@@ -29,6 +29,11 @@ LLMError = ProviderError  # single error type for callers
 
 RETRIES = 2
 
+# A timeout is weak evidence of transience: the request already ran the full
+# budget, so an identical retry usually burns another full budget and fails the
+# same way. One retry covers a genuine blip; more just delays the honest error.
+TIMEOUT_RETRIES = 1
+
 # Ceiling on model calls in flight across the whole process.
 #
 # The orchestrator nests pools: a stage runs its agents concurrently, and the
@@ -160,7 +165,8 @@ def call_json(
         except ProviderError as e:
             # Truncation, refusals and 4xx are deterministic — retrying just
             # burns money and time. Only transport-shaped failures get a retry.
-            if not _is_transient(e) or attempt == RETRIES:
+            budget = TIMEOUT_RETRIES if _is_timeout(e) else RETRIES
+            if not _is_transient(e) or attempt >= budget:
                 raise
             last_error = e
             delay = 2**attempt
@@ -178,6 +184,10 @@ def call_json(
         return parsed, cost_gbp(resolved.model, completion), resolved
 
     raise LLMError(f"{resolved.model}: failed after {RETRIES + 1} attempts: {last_error}")
+
+
+def _is_timeout(e: Exception) -> bool:
+    return "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower()
 
 
 def _is_transient(e: Exception) -> bool:

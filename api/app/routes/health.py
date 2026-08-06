@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, jsonify
 
 from ..config import Config
-from ..pipeline import llm, orchestrator, reaper
+from ..pipeline import llm, orchestrator, providers, reaper
 
 bp = Blueprint("health", __name__)
 
@@ -53,6 +53,8 @@ def health():
         pipeline={
             "max_inflight_calls": llm.MAX_INFLIGHT,
             "attempts_per_call": llm.RETRIES + 1,
+            "attempts_after_timeout": llm.TIMEOUT_RETRIES + 1,
+            "request_timeout_seconds": providers.REQUEST_TIMEOUT,
             "heartbeat_seconds": orchestrator.HEARTBEAT_EVERY.total_seconds(),
             "reaped_after_seconds": reaper.STALE_AFTER.total_seconds(),
         },

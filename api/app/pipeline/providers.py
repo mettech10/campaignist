@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,16 @@ class Completion:
 
 
 # ── OpenAI-compatible ───────────────────────────────────────────────────────
+# How long to wait on a single completion.
+#
+# This was 120s, which is fine for research (~66s measured) and far too tight
+# for strategy: six nested structures against a 16k token budget on a reasoning
+# model. Every strategy call hit the ceiling, so every campaign died in stage 2
+# — a client-side timeout presenting as a provider failure. Raise it rather than
+# retry into it; llm.call_json gives timeouts a short retry budget precisely
+# because a request that ran past this is unlikely to succeed unchanged.
+REQUEST_TIMEOUT = float(os.environ.get("LLM_TIMEOUT_SECONDS", "300"))
+
 _openai_clients: dict[tuple[str, str], object] = {}
 
 
@@ -46,7 +57,7 @@ def _openai_client(api_key: str, base_url: str):
     key = (api_key, base_url)
     if key not in _openai_clients:
         _openai_clients[key] = openai.OpenAI(
-            api_key=api_key, base_url=base_url, timeout=120.0,
+            api_key=api_key, base_url=base_url, timeout=REQUEST_TIMEOUT,
             # The SDK retries twice by default, and llm.call_json retries twice
             # on top. Left alone those multiply: one agent could make nine
             # 120-second attempts and sit there for eighteen minutes, which is
@@ -118,7 +129,7 @@ def _anthropic(api_key: str):
             ) from e
         # max_retries=0 for the same reason as the OpenAI client above.
         _anthropic_client = anthropic.Anthropic(
-            api_key=api_key, timeout=120.0, max_retries=0
+            api_key=api_key, timeout=REQUEST_TIMEOUT, max_retries=0
         )
     return _anthropic_client
 

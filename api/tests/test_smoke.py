@@ -607,19 +607,24 @@ def test_a_long_stage_keeps_reporting_progress(monkeypatch):
     from app.pipeline import orchestrator
 
     beats = []
+    beat_happened = threading.Event()
     monkeypatch.setattr(orchestrator, "HEARTBEAT_EVERY", timedelta(seconds=0.01))
-    monkeypatch.setattr(orchestrator.supabase, "update",
-                        lambda table, patch, **kw: beats.append(patch))
+
+    def record(table, patch, **kw):
+        beats.append(patch)
+        beat_happened.set()
+
+    monkeypatch.setattr(orchestrator.supabase, "update", record)
 
     with orchestrator._heartbeat("c1"):
-        # Stand in for a stage that writes nothing while it runs.
-        threading.Event().wait(0.15)
+        # Stand in for a stage that writes nothing while it runs. Waiting on the
+        # event rather than on the clock keeps this from flaking under load.
+        assert beat_happened.wait(5), "a long stage produced no heartbeat"
 
-    assert beats, "a long stage produced no heartbeat"
     assert all(set(b) == {"progress_at"} for b in beats)
 
     # And it must stop the moment the run is over, or a finished campaign would
-    # keep claiming to be alive.
+    # keep claiming to be alive. _heartbeat joins its thread, so this is exact.
     settled = len(beats)
     threading.Event().wait(0.1)
     assert len(beats) == settled
@@ -678,3 +683,38 @@ def test_model_calls_are_capped_however_deeply_the_pools_nest(monkeypatch):
 
     assert peak <= llm.MAX_INFLIGHT, f"{peak} calls in flight, cap is {llm.MAX_INFLIGHT}"
     assert peak > 1, "the cap serialised everything — concurrency is gone"
+
+
+@pytest.mark.parametrize(
+    "error, expected_attempts",
+    [
+        # A request that already burned the full timeout budget is unlikely to
+        # succeed unchanged, so it gets one retry, not two.
+        (lambda: __import__("app.pipeline.providers", fromlist=["x"]).ProviderError(
+            "kimi-k2.6: APITimeoutError: Request timed out."), 2),
+        # A rate limit is genuinely worth backing off into.
+        (lambda: __import__("app.pipeline.providers", fromlist=["x"]).ProviderError(
+            "kimi-k2.6: 429 rate limited"), 3),
+    ],
+    ids=["timeout", "rate-limit"],
+)
+def test_timeouts_get_a_shorter_retry_budget_than_other_transients(
+    monkeypatch, error, expected_attempts
+):
+    """Every strategy call was hitting a 120s ceiling and then being retried
+    into it, turning one slow agent into six minutes of dead time."""
+    from app.pipeline import llm
+
+    attempts = []
+
+    def fake_dispatch(resolved, **kw):
+        attempts.append(1)
+        raise error()
+
+    monkeypatch.setattr(llm, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+
+    with pytest.raises(llm.LLMError):
+        llm.call_json(role="strategy", system="s", user="u", schema={})
+
+    assert len(attempts) == expected_attempts

@@ -82,6 +82,10 @@ def _heartbeat(campaign_id: str):
         yield
     finally:
         stop.set()
+        # Wait for the beat in flight, so no heartbeat can land after the run is
+        # marked finished. stop.set() wakes the thread out of its wait
+        # immediately, so this returns at once; the timeout is pure paranoia.
+        thread.join(timeout=5)
 
 
 @dataclass
