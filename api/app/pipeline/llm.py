@@ -230,7 +230,11 @@ def _gets_short_budget(e: Exception) -> bool:
     roughly one call in two hundred to one in three thousand, so an unparseable
     body now gets the full budget.
     """
-    return _is_timeout(e)
+    # Truncation joins timeouts here rather than getting the full budget: by
+    # definition the attempt generated the maximum number of output tokens, so
+    # each retry is the most expensive call the pipeline can make. One fresh
+    # sample is worth it; three is £0.19 and twelve minutes on one agent.
+    return _is_timeout(e) or "max_tokens" in str(e).lower()
 
 
 def _is_transient(e: Exception) -> bool:
@@ -247,8 +251,20 @@ def _is_transient(e: Exception) -> bool:
     retry budget — see TIMEOUT_RETRIES — for the same reason a timeout does.
     """
     text = str(e).lower()
-    if "max_tokens" in text or "declined" in text:
+    if "declined" in text:
         return False
+    # Truncation reads like a request property — "this prompt needs more room" —
+    # and was treated as one. The measurements say otherwise: every agent's
+    # normal output sits between 5% and 30% of the 16k cap (research averages
+    # ~870 tokens), so hitting the ceiling is not a request that outgrew it, it
+    # is a sample that ran away and repeated itself to the wall. A fresh sample
+    # almost certainly does not. Raising the cap would only buy a slower, dearer
+    # version of the same failure.
+    #
+    # If any agent's ordinary output ever approaches the cap, this reasoning
+    # stops holding and truncation becomes deterministic again.
+    if "max_tokens" in text:
+        return True
     if "not valid json" in text:
         return True
     return any(code in text for code in ("429", "500", "502", "503", "529", "timeout", "connection"))

@@ -273,23 +273,29 @@ def test_call_json_sends_a_strict_json_schema_request(monkeypatch):
 
 
 def test_deterministic_failures_are_not_retried(monkeypatch):
-    """Truncation and refusals are deterministic — retrying burns money."""
+    """A refusal is a property of the request: the same prompt earns the same
+    refusal, so retrying only burns money.
+
+    Truncation used to be asserted here alongside it and is not deterministic —
+    see test_timeouts_get_a_shorter_retry_budget_than_other_transients. Every
+    agent's normal output sits at 5-30% of the cap, so hitting it is a sample
+    that ran away, and a fresh one is worth trying."""
     from app.pipeline import llm, providers
 
     calls = []
 
-    def always_truncates(**kwargs):
+    def always_refuses(**kwargs):
         calls.append(1)
-        raise providers.ProviderError("kimi-k3: hit max_tokens (16000) — output truncated")
+        raise providers.ProviderError("kimi-k3 declined the request (policy)")
 
-    monkeypatch.setattr(providers, "call_openai_compatible", always_truncates)
+    monkeypatch.setattr(providers, "call_openai_compatible", always_refuses)
     monkeypatch.setattr(
         llm.Config, "openai_compatible_credentials",
         classmethod(lambda cls, p: ("sk-test", "https://x/v1")),
     )
     monkeypatch.setattr(llm.Config, "MODEL_STRATEGY", "kimi-k3")
 
-    with pytest.raises(llm.LLMError, match="max_tokens"):
+    with pytest.raises(llm.LLMError, match="declined"):
         llm.call_json(role="strategy", system="s", user="u", schema={})
     assert len(calls) == 1, "a deterministic failure was retried"
 
@@ -729,8 +735,11 @@ def test_an_unparseable_body_is_retried_but_a_bad_request_is_not(monkeypatch):
         # Schema compliance is stochastic, so this gets the full budget: a
         # third attempt is cheap next to losing the call.
         "kimi-k2.5: response was not valid JSON (Expecting value); got: '<empty>'": 3,
-        # Request-shaped failures: the same prompt earns the same answer.
-        "kimi-k2.5: hit max_tokens (16000) — output truncated": 1,
+        # A runaway sample, not a prompt that outgrew the cap — normal outputs
+        # sit at 5-30% of it. Worth one fresh sample, but each attempt costs a
+        # full max_tokens generation, so only one.
+        "kimi-k2.5: hit max_tokens (16000) — output truncated": 2,
+        # Genuinely request-shaped: the same prompt earns the same refusal.
         "kimi-k2.5 declined the request (policy)": 1,
     }
 
