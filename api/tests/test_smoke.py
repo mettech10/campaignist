@@ -792,3 +792,29 @@ def test_every_default_role_model_honours_the_schema():
     for role in ("strategy", "content"):
         resolved = llm.resolve_role(role)
         assert llm.MODELS[resolved.model].honours_schema
+
+
+def test_no_agent_is_told_to_write_prose():
+    """Every agent returns a JSON object, and Moonshot enforces that softly
+    enough that the prompt's own register decides the outcome.
+
+    Two agents closed on "Write a three-email nurture sequence" / "Write N
+    distinct variants" — and those two were the only ones that ever came back
+    as Markdown, echoing the prompt's `backticks` and **bold** back. The five
+    that close on "Produce"/"Assemble" have never missed. Verbs that name a
+    document invite one.
+    """
+    import glob
+    import json
+
+    banned = ("write", "draft", "compose")
+    for path in sorted(glob.glob("app/pipeline/specs/*.json")):
+        spec = json.loads(open(path).read())
+        closing = [
+            line for line in spec["user_template"].strip().splitlines() if line.strip()
+        ][-1]
+        first_word = closing.strip().split()[0].lower()
+        assert first_word not in banned, (
+            f"{path} closes with {first_word!r}: ask an agent to produce its "
+            f"output, not to write a document, or it will write one"
+        )
