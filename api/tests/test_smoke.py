@@ -554,3 +554,35 @@ def test_no_kimi_model_is_sent_a_temperature():
     for name, spec in MODELS.items():
         if spec.provider == "kimi":
             assert not spec.supports_temperature, f"{name} would be sent a temperature"
+
+
+def test_a_generation_that_produced_nothing_refunds_the_credit(monkeypatch):
+    """Dying on the first agent leaves an empty campaign — charging for that is
+    not defensible."""
+    from app.pipeline import runner
+
+    refunded = []
+    monkeypatch.setattr(runner.supabase, "update",
+                        lambda t, patch, **kw: {"id": "c1", "business_id": "b1",
+                                                "pipeline_outputs": {}, **patch})
+    monkeypatch.setattr(runner.supabase, "select", lambda t, **kw: {"user_id": "u1"})
+    monkeypatch.setattr(runner.credits, "refund",
+                        lambda u, reason, cid: refunded.append((u, reason, cid)))
+
+    runner._fail("c1", "ProviderError: 400 invalid temperature")
+    assert refunded == [("u1", "failed_generation", "c1")]
+
+
+def test_a_partly_complete_run_keeps_the_charge(monkeypatch):
+    """Real work exists on the campaign, and regenerating from a later agent
+    does not re-spend."""
+    from app.pipeline import runner
+
+    refunded = []
+    monkeypatch.setattr(runner.supabase, "update",
+                        lambda t, patch, **kw: {"id": "c1", "business_id": "b1",
+                                                "pipeline_outputs": {"research": {}}, **patch})
+    monkeypatch.setattr(runner.credits, "refund", lambda *a: refunded.append(a))
+
+    runner._fail("c1", "boom")
+    assert refunded == []

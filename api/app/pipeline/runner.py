@@ -11,7 +11,7 @@ rather than growing the thread pool.
 import logging
 import threading
 
-from .. import supabase
+from .. import credits, supabase
 from . import orchestrator
 
 log = logging.getLogger(__name__)
@@ -53,8 +53,39 @@ def _clear_from(campaign_id: str, from_agent: str) -> None:
 
 
 def _fail(campaign_id: str, message: str) -> None:
+    """Mark the campaign failed, and return the credit if it produced nothing.
+
+    A generation that dies on its first agent — a provider 400, a bad key — has
+    cost the user a credit for an empty campaign. The reaper covers workers that
+    vanish; this covers failures that are reported properly, which are the more
+    common case and just as unfair to charge for.
+
+    A run that produced some agents' output keeps the charge: there is real work
+    on the campaign, and regenerating from a later agent does not re-spend.
+    """
+    campaign = None
     try:
-        supabase.update("campaigns", {"status": "error", "error": message[:500]},
-                        params={"id": f"eq.{campaign_id}"}, returning=False)
+        campaign = supabase.update(
+            "campaigns", {"status": "error", "error": message[:500]},
+            params={"id": f"eq.{campaign_id}"},
+        )
     except Exception:
         log.exception("[runner] campaign %s: could not record failure", campaign_id)
+        return
+
+    if not campaign or (campaign.get("pipeline_outputs") or {}):
+        return
+
+    try:
+        business = supabase.select(
+            "businesses",
+            params={"id": f"eq.{campaign['business_id']}", "select": "user_id"},
+            single=True,
+        )
+        if business:
+            credits.refund(business["user_id"], "failed_generation", campaign_id)
+            log.info("[runner] campaign %s produced nothing — credit returned", campaign_id)
+    except Exception as e:
+        # The campaign is correctly marked failed either way; a refund problem
+        # must not turn into an unhandled error in a background thread.
+        log.error("[runner] campaign %s refund failed: %s", campaign_id, e)
