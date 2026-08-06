@@ -36,9 +36,10 @@ class ModelSpec:
     input_usd: float         # per million tokens
     output_usd: float
     cached_usd: float = 0.0  # discounted rate for cache hits, where offered
-    # Reasoning models with always-on thinking fix the sampling temperature and
-    # reject any other value with a 400. When False the parameter is omitted
-    # entirely and the provider's own default applies.
+    # Some providers fix the sampling temperature and reject any other value
+    # with a 400 — Moonshot does this across its range, not only on the
+    # thinking models, which cost a live run to discover. When False the
+    # parameter is omitted entirely and the provider's own default applies.
     supports_temperature: bool = True
 
 
@@ -49,10 +50,10 @@ class ModelSpec:
 MODELS: dict[str, ModelSpec] = {
     # Kimi / Moonshot AI
     "kimi-k3":                  ModelSpec("kimi", 3.00, 15.00, 0.30, supports_temperature=False),
-    "kimi-k2.7-code":           ModelSpec("kimi", 1.20, 5.00, 0.19),
-    "kimi-k2.7-code-highspeed": ModelSpec("kimi", 1.20, 5.00, 0.19),
-    "kimi-k2.6":                ModelSpec("kimi", 0.95, 4.00, 0.16),
-    "kimi-k2.5":                ModelSpec("kimi", 0.60, 3.00, 0.10),
+    "kimi-k2.6":                ModelSpec("kimi", 0.95, 4.00, 0.16, supports_temperature=False),
+    "kimi-k2.5":                ModelSpec("kimi", 0.60, 3.00, 0.10, supports_temperature=False),
+    "kimi-k2.7-code":           ModelSpec("kimi", 1.20, 5.00, 0.19, supports_temperature=False),
+    "kimi-k2.7-code-highspeed": ModelSpec("kimi", 1.20, 5.00, 0.19, supports_temperature=False),
     # Anthropic
     "claude-opus-5":            ModelSpec("anthropic", 5.00, 25.00, 0.50),
     "claude-sonnet-5":          ModelSpec("anthropic", 3.00, 15.00, 0.30),

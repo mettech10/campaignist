@@ -126,8 +126,15 @@ class Config:
     STRIPE_WEBHOOK_SECRET = _opt("STRIPE_WEBHOOK_SECRET")
 
     # ── App ─────────────────────────────────────────────────────────────────
+    # Browsers send the Origin header without a trailing slash, so an entry
+    # written as "https://example.com/" matches nothing and every cross-origin
+    # request is blocked — with no server-side trace, because the browser never
+    # sends it. Pasting a URL from the address bar produces exactly that, so
+    # normalise rather than expect people to notice.
     CORS_ORIGINS = [
-        o.strip() for o in _opt("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+        o.strip().rstrip("/")
+        for o in _opt("CORS_ORIGINS", "http://localhost:3000").split(",")
+        if o.strip().rstrip("/")
     ]
     ENV = _opt("FLASK_ENV", "development")
 

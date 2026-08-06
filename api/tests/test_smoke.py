@@ -393,7 +393,7 @@ def test_supabase_url_is_normalised_to_its_origin():
 
 
 def test_temperature_is_omitted_for_models_that_fix_it(monkeypatch):
-    """kimi-k3 has always-on thinking and 400s on any temperature but 1."""
+    """Moonshot 400s on any temperature but 1, across its whole range."""
     from app.pipeline import llm, providers
 
     seen = {}
@@ -412,10 +412,10 @@ def test_temperature_is_omitted_for_models_that_fix_it(monkeypatch):
     llm.call_json(role="strategy", system="s", user="u", schema={})
     assert seen["temperature"] is None, "kimi-k3 must not be sent a temperature"
 
+    # Every Moonshot model fixes it, so no Kimi role may be sent one.
     monkeypatch.setattr(llm.Config, "MODEL_CONTENT", "kimi-k2.5")
-    monkeypatch.setattr(llm.Config, "LLM_TEMPERATURE", 0.6)
     llm.call_json(role="content", system="s", user="u", schema={})
-    assert seen["temperature"] == 0.6, "kimi-k2.5 should still get a temperature"
+    assert seen["temperature"] is None, "kimi-k2.5 must not be sent a temperature"
 
 
 def test_none_temperature_is_not_sent_to_the_api(monkeypatch):
@@ -526,3 +526,31 @@ def test_a_failed_refund_still_leaves_the_campaign_marked(monkeypatch):
 
     out = reaper.reap(_campaign(minutes_ago=30))
     assert out["status"] == "error"
+
+
+def test_cors_origins_tolerate_a_trailing_slash(monkeypatch):
+    """A browser sends Origin without a trailing slash, so an entry copied from
+    the address bar would otherwise match nothing and block every request."""
+    import importlib
+
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        " https://example.vercel.app/ ,http://localhost:3000, ",
+    )
+    import app.config as config
+    importlib.reload(config)
+    assert config.Config.CORS_ORIGINS == [
+        "https://example.vercel.app", "http://localhost:3000",
+    ]
+    monkeypatch.delenv("CORS_ORIGINS")
+    importlib.reload(config)
+
+
+def test_no_kimi_model_is_sent_a_temperature():
+    """Moonshot rejects any temperature but 1 on every model we use — sending
+    one fails the run at the first agent."""
+    from app.pipeline.llm import MODELS
+
+    for name, spec in MODELS.items():
+        if spec.provider == "kimi":
+            assert not spec.supports_temperature, f"{name} would be sent a temperature"
