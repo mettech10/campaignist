@@ -726,8 +726,9 @@ def test_an_unparseable_body_is_retried_but_a_bad_request_is_not(monkeypatch):
     from app.pipeline import llm, providers
 
     cases = {
-        # Response-shaped failure: worth exactly one more go.
-        "kimi-k2.5: response was not valid JSON (Expecting value); got: '<empty>'": 2,
+        # Schema compliance is stochastic, so this gets the full budget: a
+        # third attempt is cheap next to losing the call.
+        "kimi-k2.5: response was not valid JSON (Expecting value); got: '<empty>'": 3,
         # Request-shaped failures: the same prompt earns the same answer.
         "kimi-k2.5: hit max_tokens (16000) — output truncated": 1,
         "kimi-k2.5 declined the request (policy)": 1,

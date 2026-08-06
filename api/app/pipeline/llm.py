@@ -81,6 +81,11 @@ MODELS: dict[str, ModelSpec] = {
     # campaign's fan-out: 4 of 10 legs came back as JSON, the other 6 as
     # "**Variant 1**\n\n..." — well written, wrong shape, silently dropped.
     # Partial compliance is worse than none; it looks like it works.
+    #
+    # honours_schema is a threshold, not a guarantee. No Moonshot model observed
+    # here complies every time — kimi-k2.6 missed 1 call in 14 the same way.
+    # The flag separates "reliable enough that retries cover the gap" from
+    # "loses most of the work"; retries are what make the former true.
     "kimi-k2.5":                ModelSpec("kimi", 0.60, 3.00, 0.10, supports_temperature=False,
                                           honours_schema=False),
     "kimi-k2.7-code":           ModelSpec("kimi", 1.20, 5.00, 0.19, supports_temperature=False),
@@ -214,10 +219,18 @@ def _is_timeout(e: Exception) -> bool:
 def _gets_short_budget(e: Exception) -> bool:
     """Failures where a second identical attempt is the whole of the hope.
 
-    Both a timeout and an unparseable body say the request was fine and the
-    response was not. One more go is worth it; a third rarely is.
+    A timeout qualifies: the request already ran the full window, so a third
+    attempt mostly buys another full window of waiting.
+
+    An unparseable body was in here too, on the reasoning that one more go was
+    worth it and a third rarely was. That was wrong, and a later run showed why:
+    schema compliance is stochastic rather than per-model. kimi-k2.6 honoured it
+    on 13 of 14 calls in one campaign and dropped the fourteenth into Markdown.
+    Against odds like that a third attempt is cheap and takes the loss rate from
+    roughly one call in two hundred to one in three thousand, so an unparseable
+    body now gets the full budget.
     """
-    return _is_timeout(e) or "not valid json" in str(e).lower()
+    return _is_timeout(e)
 
 
 def _is_transient(e: Exception) -> bool:
