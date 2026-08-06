@@ -1,0 +1,76 @@
+{
+  "stage": 4,
+  "role": "strategy",
+  "title": "Assembly",
+  "description": "Scheduling everything into a calendar with a launch checklist",
+  "depends_on": [
+    "strategy",
+    "copy_social",
+    "email"
+  ],
+  "system": "You are a marketing strategist turning a finished set of assets into a schedule the owner can actually follow.\n\nThe calendar is what makes this a campaign rather than a pile of content. Every entry references an `asset_id` from the index you are given, exactly as written — never invent one. Sequence by funnel logic: awareness before consideration before conversion. Warm the audience before you ask. Respect the cadence set in the strategy; do not schedule daily posting for an owner who bakes for a living. `day` is 1-based and must not exceed the timeframe. Reuse strong assets deliberately rather than padding with filler. The final entry logs results, which is what feeds the next campaign.\n\n`launch_checklist` is what must be true before day 1 — accounts connected, budgets set, links live. Concrete and checkable.\n\n`success_metrics` restate the goal in measurable terms, honest about the budget.\n\nWrite in British English. No em-dashes as connectors. Never use 'unlock', 'elevate', 'game-changer', 'supercharge', or 'in today's fast-paced world'.",
+  "user_template": "## Business\n{name} — {industry}, {location}\n\n## Research\n{research}\n\n## Strategy\n{strategy}\n\n## Assets that exist (use these asset_ids exactly)\n{asset_index}\n\n## Campaign goal\n{goal}\nBudget: {budget}\nTimeframe: {timeframe_days} days\nCampaign starts: {start_date}\n\nAssemble the campaign.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "campaign_name": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "30_day_calendar": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "day": {
+              "type": "integer"
+            },
+            "date": {
+              "type": "string"
+            },
+            "channel": {
+              "type": "string"
+            },
+            "asset_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "date",
+            "channel",
+            "asset_id",
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "launch_checklist": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "success_metrics": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "campaign_name",
+      "summary",
+      "30_day_calendar",
+      "launch_checklist",
+      "success_metrics"
+    ],
+    "additionalProperties": false
+  },
+  "id": "assembly"
+}

@@ -88,10 +88,13 @@ def get_campaign(campaign_id):
 @require_auth
 def regenerate_step(campaign_id):
     """Re-run one pipeline step and everything downstream of it."""
+    from ..pipeline import agents
+
     body = request.get_json(silent=True) or {}
-    step = body.get("step")
-    if step not in (1, 2, 3, 4, 5):
-        return jsonify(error="step_must_be_1_to_5"), 400
+    agent = body.get("agent")
+    known = [a.id for a in agents.ordered()]
+    if agent not in known:
+        return jsonify(error="unknown_agent", detail=f"expected one of {known}"), 400
     if not supabase.campaign_for_user(campaign_id, g.user_id):
         return jsonify(error="not_found"), 404
 
@@ -99,8 +102,8 @@ def regenerate_step(campaign_id):
         "campaigns", {"status": "generating", "error": None},
         params={"id": f"eq.{campaign_id}"}, returning=False,
     )
-    runner.start(campaign_id, from_step=step)
-    return jsonify(campaign_id=campaign_id, status="generating", from_step=step), 202
+    runner.start(campaign_id, from_agent=agent)
+    return jsonify(campaign_id=campaign_id, status="generating", from_agent=agent), 202
 
 
 @bp.post("/api/campaigns/<campaign_id>/approve")

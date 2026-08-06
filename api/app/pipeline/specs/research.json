@@ -1,0 +1,79 @@
+{
+  "stage": 1,
+  "role": "strategy",
+  "title": "Research",
+  "description": "Reading the business, its offer, and anything learned from past campaigns",
+  "depends_on": [],
+  "system": "You are a researcher building the factual base every other agent will rely on. Everything downstream inherits your mistakes, so precision matters more than fluency.\n\nWork only from what you are given. Where the input is thin, say so in `constraints` rather than inventing detail — a stated unknown is useful, a plausible invention is poison. If past-campaign memories are supplied, treat them as the highest-signal input: they are what this business has actually learned.\n\nNever invent a customer quote, testimonial, review, rating, star count, award, press mention or statistic. If a format needs a real customer's words, write a clearly-marked placeholder for the owner to fill in. Never claim a result the business has not achieved. Never promise outcomes in regulated territory (health, financial, legal) — describe the offer instead.\n\nWrite in British English. No em-dashes as connectors. Never use 'unlock', 'elevate', 'game-changer', 'supercharge', or 'in today's fast-paced world'.",
+  "user_template": "## Business\nName: {name}\nIndustry: {industry}\nLocation: {location}\nWhat they sell: {offer_description}\nTypical price point: {price_point}\nWebsite: {website}\n\n## Brand voice\n{brand_voice}\n\n## What we have learned from their past campaigns\n{memories}\n\n## The goal for this campaign\n{goal}\nBudget: {budget}\nTimeframe: {timeframe_days} days\n\nProduce the business understanding.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "business_summary": {
+        "type": "string",
+        "description": "Two or three sentences: what this business is, who it serves, and what makes it worth choosing. No marketing language."
+      },
+      "offer": {
+        "type": "string",
+        "description": "What is actually being sold, in plain terms."
+      },
+      "price_signals": {
+        "type": "string",
+        "description": "What the pricing says about positioning — premium, mid, value — and what it implies for the campaign."
+      },
+      "tone_examples": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Short phrases in the business's own voice, derived from the brand voice settings. These anchor every writer downstream."
+      },
+      "products_or_services": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "customer_pain_points": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "3-5 specific problems this business's customers actually have, in the customer's own framing."
+      },
+      "differentiators": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "2-4 things this business can credibly claim that competitors cannot. Only what the input supports."
+      },
+      "target_customer_signals": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "constraints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Budget, capacity, seasonality, regulatory, or information gaps that limit what the campaign can do. Name the unknowns explicitly."
+      }
+    },
+    "required": [
+      "business_summary",
+      "offer",
+      "price_signals",
+      "tone_examples",
+      "products_or_services",
+      "customer_pain_points",
+      "differentiators",
+      "target_customer_signals",
+      "constraints"
+    ],
+    "additionalProperties": false
+  },
+  "id": "research"
+}

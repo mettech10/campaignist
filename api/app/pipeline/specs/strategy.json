@@ -1,0 +1,139 @@
+{
+  "stage": 2,
+  "role": "strategy",
+  "title": "Strategy",
+  "description": "Positioning, audience segments, and the funnel and channel plan",
+  "depends_on": [
+    "research"
+  ],
+  "system": "You are a marketing strategist deciding who this campaign is for, how the business should be positioned to them, and how the budget gets spent.\n\nSegments must be specific enough to target: a segment you cannot find on a channel or describe to a media buyer is not a segment. `watering_holes` must name real places this audience already is — platforms, publications, directories, events, communities — not abstractions like 'social media'. `objections` are the reasons a fitting customer still says no; write them as the customer would say them, including the uncomfortable ones about price and trust.\n\nDesign for the budget you are given. At £0 the plan is organic-only and you must say so rather than quietly assuming ad spend. Every funnel stage needs a KPI the owner can measure without analytics tooling they do not have.\n\nFor each stage, choose creative formats from the catalogue by their exact id. Choose for the job: creator-style video for cold audiences, carousels and long-form for objection handling, clean product and lifestyle shots for retargeting and paid. Do not select `meme-overlay` unless the brand voice is playful. `budget_split` percentages must sum to 100; at £0 split the effort rather than the money and say so in the labels.\n\n`expected_outcomes` must be honest about a small budget. Ranges, not single numbers.\n\nWrite in British English. No em-dashes as connectors. Never use 'unlock', 'elevate', 'game-changer', 'supercharge', or 'in today's fast-paced world'.",
+  "user_template": "## Research\n{research}\n\n## Brand voice\n{brand_voice}\n\n## Location\n{location}\n\n## The goal for this campaign\n{goal}\nBudget: {budget}\nTimeframe: {timeframe_days} days\n\n## Creative format catalogue — choose format ids from this list only\n{format_catalogue}\n\nProduce positioning, audience segments, and the funnel and channel plan. Two or three segments, three or four funnel stages.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "positioning_statement": {
+        "type": "string",
+        "description": "One or two sentences: for whom, against what alternative, on what credible basis."
+      },
+      "primary_segment": {
+        "type": "string",
+        "description": "Must match one of the segment names exactly."
+      },
+      "segments": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "demographics": {
+              "type": "string"
+            },
+            "psychographics": {
+              "type": "string"
+            },
+            "watering_holes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "objections": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "name",
+            "demographics",
+            "psychographics",
+            "watering_holes",
+            "objections"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "funnel_stages": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "stage": {
+              "type": "string"
+            },
+            "objective": {
+              "type": "string"
+            },
+            "channel": {
+              "type": "string"
+            },
+            "content_types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "formats": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Format ids from the catalogue, exactly as written."
+            },
+            "kpi": {
+              "type": "string"
+            },
+            "weekly_cadence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "stage",
+            "objective",
+            "channel",
+            "content_types",
+            "formats",
+            "kpi",
+            "weekly_cadence"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "budget_split": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "percent": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "label",
+            "percent"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "expected_outcomes": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "positioning_statement",
+      "primary_segment",
+      "segments",
+      "funnel_stages",
+      "budget_split",
+      "expected_outcomes"
+    ],
+    "additionalProperties": false
+  },
+  "id": "strategy"
+}

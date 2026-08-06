@@ -2,9 +2,9 @@ from flask import Blueprint, current_app, g, jsonify, request
 
 from .. import supabase
 from ..auth import require_auth
-from ..pipeline import steps
+from ..pipeline import orchestrator
+from ..pipeline.agents import AgentError
 from ..pipeline.llm import LLMError
-from ..pipeline.steps import StepNotImplemented
 
 bp = Blueprint("assets", __name__)
 
@@ -78,8 +78,8 @@ def regenerate_asset(asset_id):
 
     asset.pop("campaigns", None)  # join artefact from the ownership check
     try:
-        return jsonify(steps.regenerate_asset(asset))
-    except StepNotImplemented as e:
+        return jsonify(orchestrator.regenerate_asset(asset))
+    except AgentError as e:
         return jsonify(error="regenerate_failed", detail=str(e)), 422
     except LLMError as e:
         current_app.logger.warning("[assets] regenerate failed: %s", e)

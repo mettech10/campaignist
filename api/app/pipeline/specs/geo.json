@@ -1,0 +1,108 @@
+{
+  "stage": 3,
+  "role": "strategy",
+  "title": "GEO",
+  "description": "Getting cited by AI answer engines — FAQs, schema, and citable claims",
+  "depends_on": [
+    "research",
+    "strategy"
+  ],
+  "system": "You are a Generative Engine Optimization strategist. This is not SEO and must not be written as SEO.\n\nThe goal is that AI answer engines — ChatGPT, Perplexity, Google AI Overviews — cite this business when someone asks a question it can credibly answer. That is graded differently from search ranking: it rewards content depth, clear question-and-answer structure, and citation-worthy specificity over keyword density. An answer engine quotes a specific, attributable, checkable sentence. It does not quote marketing copy.\n\nFAQ blocks must answer questions real customers actually ask, in full, in the answer itself — not teasers that push to a page. An answer engine cannot follow your call to action.\n\n`citable_claims` are the highest-value output: specific, concrete statements this business could publish and be cited for — a process detail, a number, a locally-specific fact. These compound over time. Each one must be something the business can verify. Where a claim needs a figure the business has not supplied, mark it clearly as needing their input rather than inventing one.\n\n`schema_markup` entries are JSON-LD snippets they can paste, with the type named and a plain-English note on where it goes.\n\nNever invent a statistic, review count, rating or award. Where a claim would need data the business has not supplied, write it as something the owner must fill in or verify, and say so plainly.\n\nWrite in British English. No em-dashes as connectors. Never use 'unlock', 'elevate', 'game-changer', 'supercharge', or 'in today's fast-paced world'.",
+  "user_template": "## Business\n{name} — {industry}, {location}\nWhat they sell: {offer_description}\nPrice point: {price_point}\nWebsite: {website}\n\n## Research\n{research}\n\n## Strategy\n{strategy}\n\n## Campaign goal\n{goal}\n\nProduce the GEO plan.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "faq_blocks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "Phrased as a customer would actually type or say it."
+            },
+            "answer": {
+              "type": "string",
+              "description": "A complete answer, self-contained. An answer engine cannot follow a link."
+            },
+            "why_it_gets_cited": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "question",
+            "answer",
+            "why_it_gets_cited"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "citable_claims": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "description": "Specific and attributable. Mark clearly if the business must supply a figure."
+            },
+            "evidence_needed": {
+              "type": "string",
+              "description": "What the business must be able to show to publish this honestly."
+            },
+            "where_to_publish": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "claim",
+            "evidence_needed",
+            "where_to_publish"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "schema_markup": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "e.g. LocalBusiness, FAQPage, Product, Service."
+            },
+            "where": {
+              "type": "string",
+              "description": "Which page it belongs on, in plain English."
+            },
+            "jsonld": {
+              "type": "string",
+              "description": "A paste-ready JSON-LD snippet."
+            }
+          },
+          "required": [
+            "type",
+            "where",
+            "jsonld"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "answer_engine_targets": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The specific questions this business should aim to be the cited answer for."
+      }
+    },
+    "required": [
+      "faq_blocks",
+      "citable_claims",
+      "schema_markup",
+      "answer_engine_targets"
+    ],
+    "additionalProperties": false
+  },
+  "id": "geo"
+}

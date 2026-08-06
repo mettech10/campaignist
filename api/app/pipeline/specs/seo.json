@@ -1,0 +1,134 @@
+{
+  "stage": 3,
+  "role": "strategy",
+  "title": "SEO",
+  "description": "Keyword targets, on-page fixes, and content briefs for the site",
+  "depends_on": [
+    "research",
+    "strategy"
+  ],
+  "system": "You are an SEO strategist for a small business that will do this work themselves, without an agency and without paid tools.\n\nTarget keywords a small site can realistically rank for: long-tail, local, and intent-led. Do not list head terms the business has no chance against — a keyword they cannot win is worse than useless because it wastes the only content budget they have. Every keyword needs a stated intent and an honest difficulty read.\n\nOn-page recommendations must be specific and actionable by a non-specialist: which page, what to change, why. 'Improve meta descriptions' is not a recommendation; 'the services page has no H1 — make it \"Wedding cakes in Manchester\"' is.\n\nContent briefs are for pages the business should write. Each needs the search intent it serves and the questions it must answer.\n\nNever invent a statistic, review count, rating or award. Where a claim would need data the business has not supplied, write it as something the owner must fill in or verify, and say so plainly.\n\nWrite in British English. No em-dashes as connectors. Never use 'unlock', 'elevate', 'game-changer', 'supercharge', or 'in today's fast-paced world'.",
+  "user_template": "## Business\n{name} — {industry}, {location}\nWhat they sell: {offer_description}\nPrice point: {price_point}\nWebsite: {website}\n\n## Research\n{research}\n\n## Strategy\n{strategy}\n\n## Campaign goal\n{goal}\nTimeframe: {timeframe_days} days\n\nProduce the SEO plan.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "keyword_targets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "keyword": {
+              "type": "string"
+            },
+            "intent": {
+              "type": "string",
+              "enum": [
+                "informational",
+                "commercial",
+                "transactional",
+                "navigational"
+              ]
+            },
+            "difficulty": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "description": "Honest read for a small site with little authority."
+            },
+            "why": {
+              "type": "string",
+              "description": "Why this keyword is worth this business's time."
+            }
+          },
+          "required": [
+            "keyword",
+            "intent",
+            "difficulty",
+            "why"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "on_page_recommendations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "type": "string",
+              "description": "Which page, e.g. 'homepage', '/wedding-cakes'."
+            },
+            "change": {
+              "type": "string",
+              "description": "Exactly what to change, specific enough to action without a specialist."
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "page",
+            "change",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "content_briefs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "working_title": {
+              "type": "string"
+            },
+            "target_keyword": {
+              "type": "string"
+            },
+            "search_intent": {
+              "type": "string"
+            },
+            "questions_to_answer": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "internal_links": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "working_title",
+            "target_keyword",
+            "search_intent",
+            "questions_to_answer",
+            "internal_links"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "quick_wins": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Things fixable in under an hour that matter."
+      }
+    },
+    "required": [
+      "keyword_targets",
+      "on_page_recommendations",
+      "content_briefs",
+      "quick_wins"
+    ],
+    "additionalProperties": false
+  },
+  "id": "seo"
+}
