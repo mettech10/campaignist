@@ -120,8 +120,16 @@ done
 
 # ── Worker ──────────────────────────────────────────────────────────────────
 say "worker"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$HERE/render_worker.py" ] && [ -d "$HERE/workflows" ]; then
+# BASH_SOURCE is unset when this is piped from curl — there is no script file,
+# only stdin — and `set -u` turns that into a hard error on the documented
+# install path. Default it, and only trust it if it points at a real file.
+SRC="${BASH_SOURCE[0]:-}"
+if [ -n "$SRC" ] && [ -f "$SRC" ]; then
+  HERE="$(cd "$(dirname "$SRC")" && pwd)"
+else
+  HERE=""
+fi
+if [ -n "$HERE" ] && [ -f "$HERE/render_worker.py" ] && [ -d "$HERE/workflows" ]; then
   # Already have the files — copied up with scp, or running from a checkout.
   # This is the normal path: the repo is private, so a box cannot clone it
   # without being given a credential, and a rented box is the last place to
@@ -180,7 +188,11 @@ grep -q PUT_YOUR_TOKEN_HERE "$WORKER_HOME/.env" \
 # Restart=always and the server-side lease cover each other: the box reboots,
 # the worker comes back, and whatever it was mid-way through has already
 # returned to the queue on its own.
-if command -v systemctl >/dev/null 2>&1; then
+# The binary being present proves nothing: Vast instances are containers, where
+# systemctl is installed but systemd is not PID 1 and every call fails with
+# "Failed to connect to bus". /run/systemd/system only exists when it really is
+# the init system.
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
   say "service"
   cat > /etc/systemd/system/campaignist-worker.service <<EOF
 [Unit]
@@ -203,7 +215,27 @@ EOF
   echo "   systemctl enable --now campaignist-worker"
   echo "   journalctl -u campaignist-worker -f"
 else
-  warn "no systemd here — run it under tmux:  cd $WORKER_HOME && set -a && . ./.env && set +a && python3 render_worker.py"
+  say "run script (no systemd in this container)"
+  cat > "$WORKER_HOME/run.sh" <<'RUNNER'
+#!/usr/bin/env bash
+# Start the worker in the background and keep a log. Safe to re-run: it will
+# not start a second worker alongside one that is already going.
+set -euo pipefail
+cd "$(dirname "$0")"
+if [ -f worker.pid ] && kill -0 "$(cat worker.pid)" 2>/dev/null; then
+  echo "already running as PID $(cat worker.pid) — tail -f $(pwd)/worker.log"
+  exit 0
+fi
+set -a; . ./.env; set +a
+nohup python3 render_worker.py >> worker.log 2>&1 &
+echo $! > worker.pid
+sleep 2
+echo "worker started as PID $(cat worker.pid)"
+tail -n 20 worker.log
+RUNNER
+  chmod +x "$WORKER_HOME/run.sh"
+  echo "   bash $WORKER_HOME/run.sh"
+  echo "   tail -f $WORKER_HOME/worker.log"
 fi
 
 say "checks"
