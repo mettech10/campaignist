@@ -111,9 +111,20 @@ def worker_claim():
     204 means the queue is empty, which is the normal answer most of the time
     and is not an error.
     """
-    render_queue.reap()
-
-    job = render_queue.claim(g.worker_id)
+    try:
+        render_queue.reap()
+        job = render_queue.claim(g.worker_id)
+    except supabase.SupabaseError as e:
+        # The first live worker hit this and learned only "500 Server Error".
+        # The actual cause was migration 0003 never having been applied, which
+        # is a one-line fix nobody could see from the worker side. A worker on
+        # another machine can only report what it is told, so tell it.
+        log.error("[worker] queue unavailable: %s", e)
+        return jsonify(
+            error="queue_unavailable",
+            detail=str(e)[:300],
+            hint="render_jobs may be missing — apply supabase/migrations/0003_render_jobs.sql",
+        ), 503
     if not job:
         return "", 204
 

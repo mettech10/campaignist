@@ -243,11 +243,17 @@ curl -fsS "${COMFY_URL:-http://127.0.0.1:8188}/system_stats" >/dev/null \
   && echo "   ComfyUI responding" \
   || warn "ComfyUI not answering on 127.0.0.1:8188 — start it before the worker"
 
+if [ -d /run/systemd/system ]; then
+  START_CMD="systemctl enable --now campaignist-worker && journalctl -u campaignist-worker -f"
+else
+  START_CMD="bash $WORKER_HOME/run.sh && tail -f $WORKER_HOME/worker.log"
+fi
+
 cat <<EOF
 
 Ready. Start it with:
 
-  systemctl enable --now campaignist-worker && journalctl -u campaignist-worker -f
+  $START_CMD
 
 The first line should be "worker <id> up, polling $API". If the token is wrong
 you get a clear failure there instead of silence that looks like an empty queue.

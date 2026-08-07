@@ -70,8 +70,21 @@ def health():
             "lease_timeout_seconds": render_queue.LEASE_TIMEOUT.total_seconds(),
             "max_attempts": render_queue.MAX_ATTEMPTS,
             "video_formats": sorted(render_queue.VIDEO_FORMATS),
+            # Cheap round trip, because "is the table actually there" is not
+            # answerable from config and was the thing that took a live worker
+            # to discover.
+            "queue_ready": _queue_ready(),
         },
     )
+
+
+def _queue_ready() -> bool | str:
+    from .. import supabase
+    try:
+        supabase.select("render_jobs", params={"select": "id", "limit": "1"})
+        return True
+    except Exception as e:
+        return str(e)[:200]
 
 
 def _provider_key(provider: str) -> str:
