@@ -143,6 +143,13 @@ def load_workflow(fmt: str, aspect: str, prompt: dict) -> dict:
     text = " ".join(x for x in (prompt.get("brief"), prompt.get("guidance")) if x)
     # Placeholder substitution, so a workflow file stays readable JSON rather
     # than a template language.
+    #
+    # A placeholder appears in two positions and they need different treatment.
+    # As a whole value ("__WIDTH__") it is replaced by a JSON literal, so numbers
+    # arrive as numbers. Embedded in a longer string ("cinematic, __PROMPT__")
+    # the replacement is going *inside* a JSON string and has to be escaped:
+    # briefs are model-written prose and routinely contain double quotes, which
+    # inserted raw end the string early and make the whole graph unparseable.
     rendered = json.dumps(graph)
     for key, value in {
         "__PROMPT__": text,
@@ -151,9 +158,18 @@ def load_workflow(fmt: str, aspect: str, prompt: dict) -> dict:
         "__HEIGHT__": height,
         "__SEED__": random.randint(1, 2**31 - 1),
     }.items():
-        rendered = rendered.replace(f'"{key}"', json.dumps(value)) \
-                           .replace(key, str(value))
-    return json.loads(rendered)
+        literal = json.dumps(value)
+        # json.dumps of a string is the escaped form wrapped in quotes; strip
+        # the quotes to get something safe to splice into an existing string.
+        embedded = literal[1:-1] if isinstance(value, str) else literal
+        rendered = rendered.replace(f'"{key}"', literal).replace(key, embedded)
+
+    try:
+        return json.loads(rendered)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"workflow {candidate.name} did not survive substitution: {e}"
+        ) from e
 
 
 def render(job: dict, beat: Heartbeat) -> bytes:

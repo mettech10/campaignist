@@ -986,3 +986,43 @@ def test_only_video_assets_are_queued_and_never_twice(monkeypatch):
     queued = {row["asset_id"] for row in inserted}
     assert queued == {"a1"}, f"queued {queued}: expected only the un-queued video asset"
     assert inserted[0]["aspect_ratio"] == "9:16"
+
+
+def test_a_workflow_survives_a_brief_full_of_quotes():
+    """Shot briefs are model-written prose. A real one from a live campaign read:
+    'we don't do brochure weddings' — double quotes and all. Spliced raw into a
+    JSON graph that ends the string early and the whole render fails, which is
+    the first thing that would have happened on the first real job."""
+    import sys
+    from pathlib import Path
+
+    worker_dir = Path(__file__).resolve().parents[2] / "worker"
+    sys.path.insert(0, str(worker_dir))
+    try:
+        import render_worker
+    finally:
+        sys.path.remove(str(worker_dir))
+
+    hostile = [
+        'Founder says "we don\'t do brochure weddings" — close on hands.',
+        r"Shot list: A\B\C, 50% \n crop",
+        "Café façade at dusk, £49 sign ✨",
+        "",
+    ]
+    for brief in hostile:
+        graph = render_worker.load_workflow(
+            "b-roll-montage", "9:16",
+            {"brief": brief, "guidance": "Vertical.", "hook": "Stop scrolling"},
+        )
+        # Whole-value placeholders must arrive as numbers, not strings, or
+        # ComfyUI rejects the graph.
+        assert isinstance(graph["4"]["inputs"]["width"], int)
+        assert isinstance(graph["5"]["inputs"]["seed"], int)
+        # ...and an embedded one must survive intact rather than escaped twice.
+        assert brief in graph["2"]["inputs"]["text"]
+
+    # An unknown format degrades to the default graph instead of failing a job.
+    fallback = render_worker.load_workflow(
+        "format-that-does-not-exist", "16:9", {"brief": "b", "guidance": "", "hook": ""}
+    )
+    assert fallback["4"]["inputs"]["width"] == 1024
