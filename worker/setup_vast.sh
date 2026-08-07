@@ -120,14 +120,43 @@ done
 
 # ── Worker ──────────────────────────────────────────────────────────────────
 say "worker"
-if [ -d "$WORKER_HOME/.git" ]; then
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$HERE/render_worker.py" ] && [ -d "$HERE/workflows" ]; then
+  # Already have the files — copied up with scp, or running from a checkout.
+  # This is the normal path: the repo is private, so a box cannot clone it
+  # without being given a credential, and a rented box is the last place to
+  # put one.
+  echo "   using the files already at $HERE"
+  if [ "$HERE" != "$WORKER_HOME" ]; then
+    mkdir -p "$WORKER_HOME"
+    cp -r "$HERE"/. "$WORKER_HOME"/
+  fi
+elif [ -d "$WORKER_HOME/.git" ]; then
   git -C "$WORKER_HOME" pull --ff-only
-else
+elif git ls-remote "$REPO" >/dev/null 2>&1; then
   rm -rf "$WORKER_HOME"
   git clone --depth 1 "$REPO" /tmp/campaignist-src
   mkdir -p "$WORKER_HOME"
   cp -r /tmp/campaignist-src/worker/. "$WORKER_HOME"/
   rm -rf /tmp/campaignist-src
+else
+  cat <<'EOF'
+
+  Cannot reach the repo, and there are no worker files next to this script.
+  campaignist is private, so GitHub answers 404 rather than 401 — the error
+  says "not found" when it means "not yours".
+
+  Copy the folder up from your own machine instead, which needs no credential
+  on this box at all. From the repo root on your laptop:
+
+      scp -P <vast-port> -r worker/ root@<vast-host>:/opt/campaignist-worker/
+
+  then on the box:
+
+      cd /opt/campaignist-worker && bash setup_vast.sh
+
+EOF
+  die "worker files not available"
 fi
 python3 -m pip install -q requests
 
