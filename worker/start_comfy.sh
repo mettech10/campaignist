@@ -32,6 +32,56 @@ fi
 [ -n "${COMFY_ROOT:-}" ] || die "no main.py found — set COMFY_ROOT=/path/to/ComfyUI"
 echo "   $COMFY_ROOT"
 
+# ── Find the interpreter ComfyUI actually runs on ───────────────────────────
+# Starting it with the system python3 fails as
+# "ModuleNotFoundError: No module named 'sqlalchemy'", which reads like a
+# broken ComfyUI and is really the wrong interpreter: modern ComfyUI needs
+# sqlalchemy for its asset database, and those deps live in whichever venv or
+# conda env it was installed into. Anything pip-installed for ComfyUI — custom
+# node requirements included — has to go to this same python or it lands
+# somewhere ComfyUI cannot see.
+say "python"
+if [ -z "${COMFY_PYTHON:-}" ]; then
+  for candidate in \
+      "$COMFY_ROOT/venv/bin/python" "$COMFY_ROOT/.venv/bin/python" \
+      "$COMFY_ROOT/../venv/bin/python" "$COMFY_ROOT/../env/bin/python" \
+      /opt/conda/bin/python /venv/main/bin/python \
+      "$(command -v python3 || true)" ; do
+    [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+    if "$candidate" -c "import sqlalchemy, torch" >/dev/null 2>&1; then
+      COMFY_PYTHON="$candidate"; break
+    fi
+  done
+fi
+
+if [ -z "${COMFY_PYTHON:-}" ]; then
+  # Nothing has both. Fall back to whichever has torch — that is the one
+  # ComfyUI was installed against — and repair the missing pieces.
+  for candidate in \
+      "$COMFY_ROOT/venv/bin/python" "$COMFY_ROOT/.venv/bin/python" \
+      /opt/conda/bin/python /venv/main/bin/python \
+      "$(command -v python3 || true)" ; do
+    [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+    if "$candidate" -c "import torch" >/dev/null 2>&1; then
+      COMFY_PYTHON="$candidate"; break
+    fi
+  done
+  [ -n "${COMFY_PYTHON:-}" ] || die "no python with torch installed — is ComfyUI actually installed at $COMFY_ROOT?"
+  warn "$COMFY_PYTHON is missing some ComfyUI deps — installing requirements"
+  [ -f "$COMFY_ROOT/requirements.txt" ] \
+    && "$COMFY_PYTHON" -m pip install -q -r "$COMFY_ROOT/requirements.txt"
+  "$COMFY_PYTHON" -c "import sqlalchemy" >/dev/null 2>&1 \
+    || "$COMFY_PYTHON" -m pip install -q sqlalchemy
+fi
+echo "   $COMFY_PYTHON"
+
+# Custom node deps must land in the same interpreter, not the system one.
+VHS_REQ="$COMFY_ROOT/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt"
+if [ -f "$VHS_REQ" ]; then
+  "$COMFY_PYTHON" -m pip install -q -r "$VHS_REQ" \
+    || warn "could not install VideoHelperSuite requirements"
+fi
+
 # ── Start ───────────────────────────────────────────────────────────────────
 say "starting"
 if curl -fsS --max-time 5 "$COMFY_URL/system_stats" >/dev/null 2>&1; then
@@ -40,7 +90,7 @@ else
   cd "$COMFY_ROOT"
   # --listen 127.0.0.1 only. The worker is on this same box, so there is no
   # reason to expose a ComfyUI with no authentication to the internet.
-  nohup python3 main.py --listen 127.0.0.1 --port 8188 >> /tmp/comfyui.log 2>&1 &
+  nohup "$COMFY_PYTHON" main.py --listen 127.0.0.1 --port 8188 >> /tmp/comfyui.log 2>&1 &
   echo $! > /tmp/comfyui.pid
   echo "   started as PID $(cat /tmp/comfyui.pid), waiting for it to answer..."
   for _ in $(seq 1 60); do
