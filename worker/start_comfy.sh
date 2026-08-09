@@ -55,22 +55,52 @@ if [ -z "${COMFY_PYTHON:-}" ]; then
 fi
 
 if [ -z "${COMFY_PYTHON:-}" ]; then
-  # Nothing has both. Fall back to whichever has torch — that is the one
-  # ComfyUI was installed against — and repair the missing pieces.
-  for candidate in \
-      "$COMFY_ROOT/venv/bin/python" "$COMFY_ROOT/.venv/bin/python" \
-      /opt/conda/bin/python /venv/main/bin/python \
-      "$(command -v python3 || true)" ; do
-    [ -n "$candidate" ] && [ -x "$candidate" ] || continue
-    if "$candidate" -c "import torch" >/dev/null 2>&1; then
-      COMFY_PYTHON="$candidate"; break
+  # None of the usual paths worked. Stop guessing and find torch on disk: a
+  # site-packages directory containing it belongs to exactly one interpreter,
+  # and the path tells you which. Works for venvs, conda and system installs
+  # without needing to know which of them this image used.
+  say "searching for the ComfyUI environment"
+  for torch_dir in $(find / -maxdepth 8 -type d -name torch -path '*/site-packages/torch' 2>/dev/null | head -5); do
+    env_root="${torch_dir%%/lib/*}"
+    for py in "$env_root/bin/python" "$env_root/bin/python3"; do
+      if [ -x "$py" ] && "$py" -c "import torch" >/dev/null 2>&1; then
+        COMFY_PYTHON="$py"; break 2
+      fi
+    done
+  done
+fi
+
+if [ -z "${COMFY_PYTHON:-}" ]; then
+  # Report what is actually on this box rather than a bare "not found" — three
+  # rounds of guessing paths from a screenshot is slower than one round of
+  # facts.
+  printf '\n\033[31mxx no python with torch found\033[0m\n\n'
+  echo "  interpreters on PATH:"
+  for py in python python3 /opt/conda/bin/python /venv/main/bin/python; do
+    if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then
+      printf '    %-28s torch=%s sqlalchemy=%s\n' "$py" \
+        "$("$py" -c 'import torch;print(torch.__version__)' 2>/dev/null || echo no)" \
+        "$("$py" -c 'import sqlalchemy;print("yes")' 2>/dev/null || echo no)"
     fi
   done
-  [ -n "${COMFY_PYTHON:-}" ] || die "no python with torch installed — is ComfyUI actually installed at $COMFY_ROOT?"
-  warn "$COMFY_PYTHON is missing some ComfyUI deps — installing requirements"
+  echo
+  echo "  torch on disk:"
+  find / -maxdepth 8 -type d -name torch -path '*/site-packages/torch' 2>/dev/null | head -5 | sed 's/^/    /'
+  echo "    (nothing above means torch is not installed anywhere)"
+  echo
+  echo "  $COMFY_ROOT contains:"
+  ls -1 "$COMFY_ROOT" 2>/dev/null | head -12 | sed 's/^/    /'
+  echo
+  echo "  If torch is genuinely absent, ComfyUI was never fully installed here."
+  echo "  Install it through Pinokio, or set COMFY_PYTHON=/path/to/python and re-run."
+  exit 1
+fi
+
+# Repair anything the chosen interpreter is missing.
+if ! "$COMFY_PYTHON" -c "import sqlalchemy" >/dev/null 2>&1; then
+  warn "$COMFY_PYTHON lacks some ComfyUI deps — installing"
   [ -f "$COMFY_ROOT/requirements.txt" ] \
-    && "$COMFY_PYTHON" -m pip install -q -r "$COMFY_ROOT/requirements.txt"
-  "$COMFY_PYTHON" -c "import sqlalchemy" >/dev/null 2>&1 \
+    && "$COMFY_PYTHON" -m pip install -q -r "$COMFY_ROOT/requirements.txt" \
     || "$COMFY_PYTHON" -m pip install -q sqlalchemy
 fi
 echo "   $COMFY_PYTHON"
