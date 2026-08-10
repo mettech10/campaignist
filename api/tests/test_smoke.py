@@ -985,3 +985,31 @@ def test_a_render_can_be_limited_to_one(monkeypatch):
     inserted.clear()
     queue.enqueue_campaign("c1")
     assert len(inserted) == 5, "no limit should still queue everything"
+
+
+def test_a_montage_brief_is_reduced_to_one_shot():
+    """The copy agent writes for a human with a camera and an editor; fal
+    renders one continuous clip. Handing it "six to eight shots, in order"
+    asks for eight things at once and gets mush."""
+    from app.render.queue import first_shot
+
+    montage = ("9:16. Six to eight shots at ~2s each, in order: "
+               "(1) Hands feeding sourdough starter at dawn, warm window light. "
+               "(2) Close-up of local butter and free-range eggs on a steel counter. "
+               "(3) A whisk folding batter.")
+    out = first_shot(montage)
+    assert "sourdough starter at dawn" in out
+    assert "butter" not in out and "whisk" not in out, f"kept later shots: {out}"
+    assert "9:16" in out, "style preamble should survive"
+    assert "Six to eight shots" not in out, "sequence instruction should not"
+
+    numbered = ("Shot 1: Hands tipping flour onto a workbench, morning light. (~2s) "
+                "Shot 2: Sourdough starter bubbling in a jar. (~2s)")
+    assert "tipping flour" in first_shot(numbered)
+    assert "bubbling" not in first_shot(numbered)
+
+    # Already one shot — founder-piece says so outright — must pass through.
+    single = ("Medium shot of the founder carrying a finished cake in a box, "
+              "paused in the bakery doorway. Static camera, no movement. "
+              "One continuous shot.")
+    assert first_shot(single) == single

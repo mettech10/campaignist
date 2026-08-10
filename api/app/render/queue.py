@@ -14,6 +14,8 @@ worker that tended them.
 from __future__ import annotations
 
 import logging
+import re
+
 import requests
 from datetime import datetime, timedelta, timezone
 
@@ -209,16 +211,53 @@ def fail(job_id: str, worker_id: str, reason: str) -> dict | None:
     return updated[0] if isinstance(updated, list) else updated
 
 
+# A montage brief opens by announcing the sequence, then numbers the shots.
+# Both spellings appear in real output: "(1) Hands feeding sourdough starter"
+# and "Shot 1: Hands tipping flour".
+_SHOT_LEAD = re.compile(r"^.*?\b(?:shots?|in order)\b[^:.]*[:.]\s*", re.I | re.S)
+_FIRST_SHOT = re.compile(r"(?:\(\s*1\s*\)|shot\s*1\s*:)(.*?)(?=\(\s*2\s*\)|shot\s*2\s*:|$)",
+                         re.I | re.S)
+
+
+def first_shot(brief: str) -> str:
+    """Reduce a multi-shot brief to the one shot a single clip can be.
+
+    The copy agent writes for a human with a camera and an editor, so a
+    b-roll-montage brief reads "Six to eight shots at ~2s each, in order: (1)
+    ... (2) ...". fal renders one continuous clip. Handing it the whole
+    sequence asks for eight things at once and gets mush, so take shot one and
+    render that honestly rather than pretending a montage fits in five seconds.
+
+    Briefs that are already a single shot — founder-piece says so explicitly,
+    "static camera, one continuous shot" — pass through untouched.
+    """
+    match = _FIRST_SHOT.search(brief or "")
+    if not match:
+        return (brief or "").strip()
+    shot = match.group(1).strip(" .;,\n")
+    # Keep any style preamble ("9:16, warm tones, shot on 35mm") and drop only
+    # the sentence that announced a sequence.
+    preamble = _SHOT_LEAD.match(brief or "")
+    prefix = ""
+    if preamble:
+        lead = brief[: preamble.end()]
+        prefix = re.sub(r"\b(?:six|seven|eight|\d+)\s*(?:to\s*\w+\s*)?shots?[^.]*[.:]?", "", lead, flags=re.I)
+        prefix = re.sub(r"\bin order\b[:.]?", "", prefix, flags=re.I).strip(" .;,:")
+    return f"{prefix}. {shot}".strip(" .") if prefix else shot
+
+
 def _fal_payload(job: dict) -> dict:
     """Turn a shot brief into a fal request.
 
-    The brief is written for a human with a camera — "straight-down perspective,
-    an open sketchbook turned 45 degrees" — which is already close to what an
-    image-to-video model wants, so it goes through nearly as written rather than
-    being rewritten into keyword soup.
+    The brief is written for a human with a camera — "medium shot of the founder
+    carrying a finished cake, natural daylight, warm tones" — which is already
+    close to what a video model wants, so it goes through nearly as written
+    rather than being rewritten into keyword soup.
     """
     prompt = job.get("prompt") or {}
-    text = " ".join(x for x in (prompt.get("brief"), prompt.get("guidance")) if x)
+    text = " ".join(
+        x for x in (first_shot(prompt.get("brief") or ""), prompt.get("guidance")) if x
+    )
     return {
         "prompt": text[:1500],
         "aspect_ratio": job.get("aspect_ratio") or "9:16",
