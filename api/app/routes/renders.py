@@ -42,8 +42,12 @@ def start_renders(campaign_id: str):
     # ?model= lets the same brief be tried on a different renderer. Prompt
     # adherence varies far more between models than any amount of prompt
     # tuning recovers, and that is worth being able to test rather than argue.
+    asset_ids = {a for a in (request.args.get("assets") or "").split(",") if a.strip()}
     queued = render_queue.enqueue_campaign(
-        campaign_id, limit=limit, model=(request.args.get("model") or "").strip() or None
+        campaign_id,
+        limit=limit,
+        model=(request.args.get("model") or "").strip() or None,
+        asset_ids=asset_ids or None,
     )
     # Kick the drain thread. Idempotent — if one is already running it returns
     # immediately, and it picks up anything queued while it was working.

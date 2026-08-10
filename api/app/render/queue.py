@@ -57,7 +57,8 @@ def _parse(ts: str | None) -> datetime | None:
 
 
 def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
-                     model: str | None = None) -> list[dict]:
+                     model: str | None = None,
+                     asset_ids: set[str] | None = None) -> list[dict]:
     """Queue a render for every video asset in a campaign.
 
     Idempotent by construction: a partial unique index allows only one live job
@@ -67,6 +68,10 @@ def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
     `limit` renders a few and leaves the rest queued for later. Every clip costs
     real money now, so committing to twenty before seeing one is a bad default;
     the endpoint exposes this so someone can look before they buy the set.
+
+    `asset_ids` renders specific assets rather than whichever the campaign
+    happens to list first — the campaign view already offers a per-asset
+    regenerate, and "render this one again" is the same intent.
 
     `model` overrides the configured one for these jobs. Models differ by an
     order of magnitude in both price and how closely they follow direction, and
@@ -92,6 +97,8 @@ def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
     rows = []
     for asset in assets:
         if asset["id"] in already:
+            continue
+        if asset_ids is not None and asset["id"] not in asset_ids:
             continue
         fmt = formats.FORMATS.get(asset.get("format") or "")
         if not fmt or fmt["category"] != "video":

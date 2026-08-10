@@ -1123,3 +1123,19 @@ def test_the_copy_agent_is_told_video_is_rendered_not_filmed():
     assert "photography style" in system, "the banned phrase must be named to be banned"
     assert "single continuous clip" in system
     assert "no editor" in system
+
+
+def test_specific_assets_can_be_rendered(monkeypatch):
+    """Whichever asset a campaign happens to list first is not usually the one
+    you want to re-render — the campaign view already offers per-asset actions."""
+    from app.render import queue
+
+    inserted = []
+    monkeypatch.setattr(queue.supabase, "insert",
+                        lambda t, rows: inserted.extend(rows) or rows)
+    monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
+        [{"id": f"a{i}", "format": "founder-piece", "content": {}, "image_brief": "b"}
+         for i in range(4)] if table == "content_assets" else []))
+
+    queue.enqueue_campaign("c1", asset_ids={"a2"})
+    assert [r["asset_id"] for r in inserted] == ["a2"]
