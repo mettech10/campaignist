@@ -1,8 +1,12 @@
+import logging
+
 from flask import Blueprint, g, jsonify, request
 
 from .. import supabase
+from ..research import profile, site
 from ..auth import require_auth
 
+log = logging.getLogger(__name__)
 bp = Blueprint("business", __name__)
 
 EDITABLE = (
@@ -38,6 +42,34 @@ def update_profile():
         "profiles", {"full_name": body["full_name"]}, params={"id": f"eq.{g.user_id}"}
     )
     return jsonify(row)
+
+
+@bp.post("/api/business/from-url")
+@require_auth
+def draft_business_from_url():
+    """Read a website and return a profile draft. Saves nothing.
+
+    §1 of the north star is "paste your website URL and get a campaign". This
+    is that front door: the owner confirms a filled form instead of completing
+    an empty one.
+
+    Nothing is written here on purpose. The model is reading marketing copy,
+    which overstates, and a profile the owner has not seen would put words in
+    their mouth in every campaign that follows.
+    """
+    body = request.get_json(silent=True) or {}
+    url = (body.get("url") or "").strip()
+
+    try:
+        return jsonify(profile.draft_from_url(url))
+    except site.SiteError as e:
+        # A readable reason and a clear signal to fall back to the form. Sites
+        # that are image-only, JavaScript-only or simply blocking us are common
+        # enough that this is an ordinary path, not an error.
+        return jsonify(error="site_unreadable", message=str(e), fallback="manual"), 422
+    except Exception as e:
+        log.exception("[business] could not draft from %r", url)
+        return jsonify(error="draft_failed", message=str(e)[:200], fallback="manual"), 502
 
 
 @bp.post("/api/business")

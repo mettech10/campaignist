@@ -1139,3 +1139,72 @@ def test_specific_assets_can_be_rendered(monkeypatch):
 
     queue.enqueue_campaign("c1", asset_ids={"a2"})
     assert [r["asset_id"] for r in inserted] == ["a2"]
+
+
+# ── URL-first onboarding ────────────────────────────────────────────────────
+def test_a_user_supplied_url_cannot_reach_our_own_network():
+    """The server fetches a URL the user typed. Without this it is a
+    server-side request forgery hole: a link to the cloud metadata endpoint
+    asks our infrastructure to read its own credentials and hand them back."""
+    from app.research import site
+
+    for hostile in (
+        "http://169.254.169.254/latest/meta-data/",   # cloud metadata
+        "http://127.0.0.1:8188/",                     # loopback
+        "http://192.168.1.1/",                        # private range
+        "http://10.0.0.5/",
+        "file:///etc/passwd",                         # not http at all
+        "http://localhost/",
+    ):
+        with pytest.raises(site.SiteError):
+            site.normalise(hostile)
+
+    # ...while ordinary addresses still work, with or without a scheme.
+    assert site.normalise("example.com") == "https://example.com"
+    assert site.normalise("https://www.bbc.co.uk").startswith("https://")
+
+
+def test_a_redirect_to_a_private_address_is_refused(monkeypatch):
+    """Checking the URL the user typed is not enough — a public host can
+    redirect to a private one, and requests follows redirects by default."""
+    from app.research import site
+
+    class FakeResponse:
+        status_code = 200
+        url = "http://169.254.169.254/latest/meta-data/"
+        headers = {"Content-Type": "text/html"}
+        encoding = "utf-8"
+        raw = type("R", (), {"read": staticmethod(lambda *a, **kw: b"<html></html>")})()
+
+    monkeypatch.setattr(site.requests, "get", lambda *a, **kw: FakeResponse())
+    with pytest.raises(site.SiteError):
+        site._fetch("https://example.com")
+
+
+def test_a_site_with_almost_no_text_falls_back_rather_than_pretending(monkeypatch):
+    """An image-only or JavaScript-only site yields a few words. Feeding that to
+    the pipeline and calling it research produces a confident campaign built on
+    nothing; saying so sends the owner to the form instead."""
+    from app.research import site
+
+    monkeypatch.setattr(site, "_fetch", lambda url: "<html><title>Hi</title><body>Welcome</body></html>")
+    with pytest.raises(site.SiteError, match="not enough text"):
+        site.read("https://example.com")
+
+
+def test_the_profile_draft_matches_the_onboarding_shape():
+    """A drafted profile and a hand-filled one must be the same shape, or
+    everything downstream has two cases to handle."""
+    from app.research.profile import SCHEMA
+
+    props = SCHEMA["properties"]
+    for column in ("name", "industry", "location", "offer_description", "price_point"):
+        assert column in props, f"{column} is a businesses column and must be drafted"
+
+    voice = props["brand_voice"]["properties"]
+    assert set(voice) == {"tone", "energy", "humor", "authority", "detail"}, (
+        "brand_voice must match the onboarding quiz keys"
+    )
+    # Constrained to the same options the quiz offers, so a drafted voice can be
+    # edited with the same toggles.
+    assert voice["tone"]["enum"] == ["Formal", "Conversational", "Casual"]
