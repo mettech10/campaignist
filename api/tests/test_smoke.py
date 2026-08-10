@@ -1065,3 +1065,18 @@ def test_a_job_can_override_the_configured_model(monkeypatch):
 
     queue.process(inserted[0] | {"id": "j1", "campaign_id": "c1"}, "w1")
     assert submitted == ["fal-ai/veo3/fast"], "the job's model was ignored"
+
+
+def test_clip_length_is_spelled_the_way_each_model_expects():
+    """Models do not share a request schema and the differences are undocumented
+    centrally — Veo rejected `duration: 5` with "should be '4s', '6s' or '8s'".
+    Each case here was learned from a real 422."""
+    from app.render.queue import duration_field
+
+    # Veo: string, from a fixed set, snapped to the nearest rather than refused.
+    assert duration_field("fal-ai/veo3/fast", 5) == {"duration": "4s"}
+    assert duration_field("fal-ai/veo3/fast", 7) == {"duration": "6s"}
+    assert duration_field("fal-ai/veo3/fast", 8) == {"duration": "8s"}
+
+    # Anything else keeps the plain integer that wan accepts.
+    assert duration_field("fal-ai/wan-25-preview/text-to-video", 5) == {"duration": 5}

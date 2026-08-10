@@ -268,7 +268,30 @@ def first_shot(brief: str) -> str:
     return f"{prefix}. {shot}".strip(" .") if prefix else shot
 
 
-def _fal_payload(job: dict) -> dict:
+# Models do not share a request schema, and the differences are not documented
+# anywhere central — they surface as a 422 the first time you try one. Veo
+# takes a string from a fixed set ("4s", "6s", "8s"); wan takes a plain number
+# of seconds. Each entry here was learned from an actual rejection.
+_DURATION_ENUM = {
+    "fal-ai/veo": [4, 6, 8],
+}
+
+
+def duration_field(model: str, seconds: int) -> dict:
+    """Spell the clip length the way this model expects.
+
+    Snapping to the nearest allowed value rather than failing: a model that
+    only does 4, 6 or 8 seconds should render a 6-second clip when asked for 5,
+    not refuse the job.
+    """
+    for prefix, allowed in _DURATION_ENUM.items():
+        if model.startswith(prefix):
+            pick = min(allowed, key=lambda a: (abs(a - seconds), a))
+            return {"duration": f"{pick}s"}
+    return {"duration": seconds}
+
+
+def _fal_payload(job: dict, model: str = "") -> dict:
     """Turn a shot brief into a fal request.
 
     The brief is written for a human with a camera — "medium shot of the founder
@@ -283,7 +306,7 @@ def _fal_payload(job: dict) -> dict:
     return {
         "prompt": text[:1500],
         "aspect_ratio": aspect_ratio(job.get("aspect_ratio") or ""),
-        "duration": Config.FAL_VIDEO_SECONDS,
+        **duration_field(model or Config.FAL_VIDEO_MODEL, Config.FAL_VIDEO_SECONDS),
     }
 
 
@@ -305,7 +328,7 @@ def process(job: dict, worker_id: str) -> None:
     job_id = job["id"]
     model = (job.get("prompt") or {}).get("model") or Config.FAL_VIDEO_MODEL
     try:
-        request_id = fal.submit(model, _fal_payload(job))
+        request_id = fal.submit(model, _fal_payload(job, model))
         log.info("[render] job %s submitted to %s as %s", job_id, model, request_id)
 
         # Beat on every poll. A long queue at fal must not read as a dead
