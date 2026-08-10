@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, jsonify
 
 from ..config import Config
-from .. import render_queue
+from ..render import queue as render_queue
 from ..pipeline import llm, orchestrator, providers, reaper
 
 bp = Blueprint("health", __name__)
@@ -62,11 +62,12 @@ def health():
             "heartbeat_seconds": orchestrator.HEARTBEAT_EVERY.total_seconds(),
             "reaped_after_seconds": reaper.STALE_AFTER.total_seconds(),
         },
-        # The GPU worker is a separate machine that can only be diagnosed from
-        # here — if its token is unset the queue refuses it and the symptom is
-        # simply that no video ever appears.
+        # An unset FAL_KEY presents as renders that queue and never finish, so
+        # it is worth being able to read off a live deploy.
         renders={
-            "worker_token_present": bool(Config.RENDER_WORKER_TOKEN),
+            "fal_key_present": bool(Config.FAL_KEY),
+            "model": Config.FAL_VIDEO_MODEL,
+            "seconds_per_clip": Config.FAL_VIDEO_SECONDS,
             "lease_timeout_seconds": render_queue.LEASE_TIMEOUT.total_seconds(),
             "max_attempts": render_queue.MAX_ATTEMPTS,
             "video_formats": sorted(render_queue.VIDEO_FORMATS),

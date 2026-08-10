@@ -834,140 +834,16 @@ def _template_keys(template: str) -> set:
     return {f for _, f, _, _ in string.Formatter().parse(template) if f}
 
 
-# ── GPU render queue ────────────────────────────────────────────────────────
-def test_worker_endpoints_fail_closed_when_no_token_is_configured(client, monkeypatch):
-    """An unset RENDER_WORKER_TOKEN must not mean an open queue. These routes
-    are public and the worker is the only caller, so the failure mode of a
-    missed env var has to be refusal, not anonymous access."""
-    from app.routes import renders
-
-    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "")
-    resp = client.post("/api/worker/claim",
-                       headers={"Authorization": "Bearer anything", "X-Worker-Id": "w1"})
-    assert resp.status_code == 503
-    assert resp.get_json()["error"] == "worker_auth_unconfigured"
 
 
-def test_a_wrong_worker_token_is_rejected(client, monkeypatch):
-    from app.routes import renders
-
-    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "correct-horse")
-    for header in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": "correct-horse"}):
-        resp = client.post("/api/worker/claim", headers={**header, "X-Worker-Id": "w1"})
-        assert resp.status_code == 401, header
-
-
-def test_a_worker_must_identify_itself(client, monkeypatch):
-    """Leases are held by a named worker. Without an id there is nobody to scope
-    a heartbeat to, so two boxes could hand the same job back and forth."""
-    from app.routes import renders
-
-    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "correct-horse")
-    resp = client.post("/api/worker/claim", headers={"Authorization": "Bearer correct-horse"})
-    assert resp.status_code == 400
-    assert resp.get_json()["error"] == "missing_worker_id"
-
-
-def test_a_worker_cannot_point_a_job_at_another_tenants_video(client, monkeypatch):
-    """The worker names its own upload path. Unchecked, it could finish a job
-    against any object in the bucket and the owner would be served someone
-    else's video through a URL we signed."""
-    from app.routes import renders
-
-    monkeypatch.setattr(renders.Config, "RENDER_WORKER_TOKEN", "correct-horse")
-    completed = []
-    monkeypatch.setattr(renders.render_queue, "complete",
-                        lambda *a: completed.append(a) or {"id": "j1"})
-
-    headers = {"Authorization": "Bearer correct-horse", "X-Worker-Id": "w1"}
-    for path in ("../other-campaign/j1.mp4",
-                 "some-campaign/nested/j1.mp4",
-                 "other-campaign/someone-elses.mp4"):
-        resp = client.post("/api/worker/jobs/j1/complete", headers=headers,
-                           json={"video_path": path})
-        assert resp.status_code == 400, path
-    assert completed == [], "a bad path reached the queue"
-
-    resp = client.post("/api/worker/jobs/j1/complete", headers=headers,
-                       json={"video_path": "campaign-abc/j1.mp4"})
-    assert resp.status_code == 200
-
-
-def test_a_heartbeat_from_the_wrong_worker_does_not_steal_the_lease(monkeypatch):
-    """If a job was reaped and re-claimed while the first worker was busy, its
-    next beat must not take it back — and it has to hear that it lost."""
-    from app import render_queue
-
-    seen = {}
-
-    def fake_update(table, patch, *, params, **kw):
-        seen["params"] = params
-        # PostgREST matches nothing when claimed_by does not agree.
-        return [] if params.get("claimed_by") != "eq.owner" else [{"id": "j1"}]
-
-    monkeypatch.setattr(render_queue.supabase, "update", fake_update)
-
-    assert render_queue.heartbeat("j1", "owner") is True
-    assert render_queue.heartbeat("j1", "impostor") is False
-    assert seen["params"]["status"] == "eq.claimed"
-
-
-def test_an_abandoned_lease_goes_back_on_the_queue(monkeypatch):
-    """A Vast instance is interruptible — that is why it is £1.8/day. It cannot
-    tell us it died, so nothing else will ever move this row."""
-    from datetime import datetime, timedelta, timezone
-
-    from app import render_queue
-
-    now = datetime.now(timezone.utc)
-    dead = (now - timedelta(minutes=30)).isoformat()
-    alive = (now - timedelta(seconds=10)).isoformat()
-
-    patches = []
-    monkeypatch.setattr(render_queue.supabase, "select", lambda t, **kw: [
-        {"id": "dead", "attempts": 0, "progress_at": dead, "claimed_by": "w1"},
-        {"id": "alive", "attempts": 0, "progress_at": alive, "claimed_by": "w2"},
-    ])
-    monkeypatch.setattr(render_queue.supabase, "update",
-                        lambda t, patch, **kw: patches.append((kw["params"]["id"], patch))
-                        or [{"id": "x"}])
-
-    assert render_queue.reap(now=now) == 1
-    assert len(patches) == 1
-    job_id, patch = patches[0]
-    assert job_id == "eq.dead", "a worker that is still beating lost its job"
-    assert patch["status"] == "queued"
-    assert patch["attempts"] == 1
-    assert patch["claimed_by"] is None
-
-
-def test_a_render_that_keeps_dying_is_eventually_called_dead(monkeypatch):
-    """Otherwise an asset that always OOMs cycles through the queue forever,
-    burning GPU time that is being paid for by the hour."""
-    from datetime import datetime, timedelta, timezone
-
-    from app import render_queue
-
-    now = datetime.now(timezone.utc)
-    patches = []
-    monkeypatch.setattr(render_queue.supabase, "select", lambda t, **kw: [{
-        "id": "j1", "attempts": render_queue.MAX_ATTEMPTS - 1,
-        "progress_at": (now - timedelta(hours=1)).isoformat(), "claimed_by": "w1",
-    }])
-    monkeypatch.setattr(render_queue.supabase, "update",
-                        lambda t, patch, **kw: patches.append(patch) or [{"id": "j1"}])
-
-    render_queue.reap(now=now)
-    assert patches[0]["status"] == "error"
-
-
+# ── Video renders (fal.ai) ──────────────────────────────────────────────────
 def test_only_video_assets_are_queued_and_never_twice(monkeypatch):
     """Re-rendering an asset should replace its video, not queue a second render
     beside the first and race it to the same upload path."""
-    from app import render_queue
+    from app.render import queue
 
     inserted = []
-    monkeypatch.setattr(render_queue.supabase, "insert",
+    monkeypatch.setattr(queue.supabase, "insert",
                         lambda t, rows: inserted.extend(rows) or rows)
 
     def fake_select(table, *, params=None, **kw):
@@ -980,49 +856,111 @@ def test_only_video_assets_are_queued_and_never_twice(monkeypatch):
             ]
         return [{"asset_id": "a4"}]  # already queued
 
-    monkeypatch.setattr(render_queue.supabase, "select", fake_select)
+    monkeypatch.setattr(queue.supabase, "select", fake_select)
 
-    render_queue.enqueue_campaign("c1")
+    queue.enqueue_campaign("c1")
     queued = {row["asset_id"] for row in inserted}
     assert queued == {"a1"}, f"queued {queued}: expected only the un-queued video asset"
     assert inserted[0]["aspect_ratio"] == "9:16"
 
 
-def test_a_workflow_survives_a_brief_full_of_quotes():
-    """Shot briefs are model-written prose. A real one from a live campaign read:
-    'we don't do brochure weddings' — double quotes and all. Spliced raw into a
-    JSON graph that ends the string early and the whole render fails, which is
-    the first thing that would have happened on the first real job."""
-    import sys
-    from pathlib import Path
+def test_an_abandoned_render_goes_back_on_the_queue(monkeypatch):
+    """Render redeploys mid-render exactly as the old GPU box got interrupted
+    mid-render. Nothing else will ever move a row left in `claimed`."""
+    from datetime import datetime, timedelta, timezone
 
-    worker_dir = Path(__file__).resolve().parents[2] / "worker"
-    sys.path.insert(0, str(worker_dir))
-    try:
-        import render_worker
-    finally:
-        sys.path.remove(str(worker_dir))
+    from app.render import queue
 
-    hostile = [
-        'Founder says "we don\'t do brochure weddings" — close on hands.',
-        r"Shot list: A\B\C, 50% \n crop",
-        "Café façade at dusk, £49 sign ✨",
-        "",
-    ]
-    for brief in hostile:
-        graph = render_worker.load_workflow(
-            "b-roll-montage", "9:16",
-            {"brief": brief, "guidance": "Vertical.", "hook": "Stop scrolling"},
-        )
-        # Whole-value placeholders must arrive as numbers, not strings, or
-        # ComfyUI rejects the graph.
-        assert isinstance(graph["4"]["inputs"]["width"], int)
-        assert isinstance(graph["5"]["inputs"]["seed"], int)
-        # ...and an embedded one must survive intact rather than escaped twice.
-        assert brief in graph["2"]["inputs"]["text"]
+    now = datetime.now(timezone.utc)
+    patches = []
+    monkeypatch.setattr(queue.supabase, "select", lambda t, **kw: [
+        {"id": "dead", "attempts": 0, "claimed_by": "w1",
+         "progress_at": (now - timedelta(minutes=30)).isoformat()},
+        {"id": "alive", "attempts": 0, "claimed_by": "w2",
+         "progress_at": (now - timedelta(seconds=10)).isoformat()},
+    ])
+    monkeypatch.setattr(queue.supabase, "update",
+                        lambda t, patch, **kw: patches.append((kw["params"]["id"], patch))
+                        or [{"id": "x"}])
 
-    # An unknown format degrades to the default graph instead of failing a job.
-    fallback = render_worker.load_workflow(
-        "format-that-does-not-exist", "16:9", {"brief": "b", "guidance": "", "hook": ""}
-    )
-    assert fallback["4"]["inputs"]["width"] == 1024
+    assert queue.reap(now=now) == 1
+    job_id, patch = patches[0]
+    assert job_id == "eq.dead", "a render still beating lost its job"
+    assert patch["status"] == "queued" and patch["claimed_by"] is None
+
+
+def test_a_render_that_keeps_failing_is_eventually_called_dead(monkeypatch):
+    """fal bills per render. An asset that always fails must not cycle the queue
+    forever spending real money on the same failure."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.render import queue
+
+    now = datetime.now(timezone.utc)
+    patches = []
+    monkeypatch.setattr(queue.supabase, "select", lambda t, **kw: [{
+        "id": "j1", "attempts": queue.MAX_ATTEMPTS - 1, "claimed_by": "w1",
+        "progress_at": (now - timedelta(hours=1)).isoformat(),
+    }])
+    monkeypatch.setattr(queue.supabase, "update",
+                        lambda t, patch, **kw: patches.append(patch) or [{"id": "j1"}])
+
+    queue.reap(now=now)
+    assert patches[0]["status"] == "error"
+
+
+def test_losing_the_lease_mid_render_does_not_overwrite_the_new_owner(monkeypatch):
+    """If a job was reaped and re-claimed while fal was still rendering, this
+    thread must abandon it — not upload over whoever owns it now, and not mark
+    it failed underneath them."""
+    from app.render import queue
+
+    monkeypatch.setattr(queue.fal, "submit", lambda model, payload: "req-1")
+    monkeypatch.setattr(queue, "heartbeat", lambda job_id, worker_id: False)
+
+    def fake_wait(model, request_id, *, on_progress=None):
+        on_progress()          # lease is gone; this must raise
+        raise AssertionError("kept rendering after losing the lease")
+
+    monkeypatch.setattr(queue.fal, "wait", fake_wait)
+
+    wrote = []
+    monkeypatch.setattr(queue, "complete", lambda *a: wrote.append(("complete", a)))
+    monkeypatch.setattr(queue, "fail", lambda *a: wrote.append(("fail", a)))
+
+    queue.process({"id": "j1", "campaign_id": "c1", "prompt": {}, "aspect_ratio": "9:16"}, "w1")
+    assert wrote == [], f"a lost lease still wrote to the job: {wrote}"
+
+
+def test_a_failed_render_records_why(monkeypatch):
+    """The GPU worker's failures arrived as '500 Server Error' and nothing else.
+    A render that fails should say what happened, on the row, where the owner's
+    status endpoint will show it."""
+    from app.render import queue
+
+    monkeypatch.setattr(queue.fal, "submit",
+                        lambda model, payload: (_ for _ in ()).throw(
+                            queue.fal.FalError("422 prompt rejected")))
+    monkeypatch.setattr(queue, "heartbeat", lambda *a: True)
+
+    failures = []
+    monkeypatch.setattr(queue, "fail", lambda job_id, worker, reason: failures.append(reason))
+
+    queue.process({"id": "j1", "campaign_id": "c1", "prompt": {}, "aspect_ratio": "9:16"}, "w1")
+    assert failures and "422 prompt rejected" in failures[0]
+
+
+def test_the_brief_reaches_fal_intact(monkeypatch):
+    """The brief is written for a human with a camera, which is already close to
+    what a video model wants. It should arrive as prose, not keyword soup."""
+    from app.render import queue
+
+    job = {
+        "id": "j1", "campaign_id": "c1", "aspect_ratio": "9:16",
+        "prompt": {"brief": 'Straight-down shot of an open sketchbook, "no people".',
+                   "guidance": "Vertical, 9:16."},
+    }
+    payload = queue._fal_payload(job)
+    assert "sketchbook" in payload["prompt"]
+    assert payload["aspect_ratio"] == "9:16"
+    assert isinstance(payload["duration"], int)

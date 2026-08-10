@@ -123,13 +123,14 @@ class Config:
             raise ConfigError(f"{provider!r} is not an OpenAI-compatible provider")
         return cls.require_key(provider), base
 
-    # ── GPU render worker ───────────────────────────────────────────────────
-    # Shared secret for the rented GPU box. Deliberately not the service-role
-    # key: the worker runs on an interruptible Vast.ai instance owned by an
-    # anonymous marketplace host, so it gets a credential that can claim jobs
-    # and upload one object per job, and nothing else. Unset means the worker
-    # endpoints refuse rather than open.
-    RENDER_WORKER_TOKEN = _opt("RENDER_WORKER_TOKEN")
+    # ── Video rendering ─────────────────────────────────────────────────────
+    # fal.ai renders the video. This replaced a rented GPU box: £54/month
+    # whether or not anything rendered, against roughly $0.15 a clip and
+    # nothing at all when idle. Break-even was somewhere near 450 clips a
+    # month, which is a long way from where this product is.
+    FAL_KEY = _opt("FAL_KEY")
+    FAL_VIDEO_MODEL = _opt("FAL_VIDEO_MODEL", "fal-ai/wan-25-preview/text-to-video")
+    FAL_VIDEO_SECONDS = int(_opt("FAL_VIDEO_SECONDS", "5"))
 
     # ── Stripe ──────────────────────────────────────────────────────────────
     STRIPE_SECRET_KEY = _opt("STRIPE_SECRET_KEY")

@@ -1,36 +1,35 @@
 """The video render queue.
 
-Campaignist writes shot briefs; this is what turns one into an actual video. A
-rented GPU box polls `claim()`, renders, and uploads. Every decision here is
-shaped by one fact: that box is an interruptible Vast.ai instance, which is what
-makes it £1.8/day instead of £6. It can disappear mid-render at any moment, with
-no warning and no chance to tidy up.
+Campaignist writes shot briefs; this turns one into an actual video by calling
+fal.ai. A job is still a *row* rather than a function call, because a render
+takes minutes and the process running it can restart at any time — Render
+redeploys mid-render exactly as a rented GPU box got interrupted mid-render.
 
-So a job is never handed out — it is *leased*. The worker holds the lease only
-while it keeps beating, and a lease that stops beating goes back on the queue for
-someone else. This is the same shape as the stalled-campaign reaper, for the same
-reason and after the same lesson: work that vanishes silently is worse than work
-that fails loudly, because nobody knows to look.
-
-The worker never touches Supabase. It holds one token, talks only to this API,
-and gets a single-object upload URL per job.
+This began as a queue for a GPU worker on Vast.ai, and the lease survived the
+move to a hosted API for the same reason it existed then: work that vanishes
+silently is worse than work that fails loudly, because nobody knows to look.
+What went away was the GPU box, ComfyUI, torch, two 8GB checkpoints and the
+worker that tended them.
 """
 from __future__ import annotations
 
 import logging
+import requests
 from datetime import datetime, timedelta, timezone
 
-from . import supabase
-from .pipeline import formats
+from .. import supabase
+from ..config import Config
+from ..pipeline import formats
+from . import fal
 
 log = logging.getLogger(__name__)
 
 BUCKET = "renders"
 
-# A lease is lost this long after the last heartbeat. Generous next to the
-# worker's 30s beat: a box under load, swapping a model in, or mid-upload should
-# not lose a render it is still doing. Cheap to be wrong in this direction —
-# a late reap costs latency, an early one costs duplicated GPU time.
+# A job is abandoned this long after its last heartbeat. The processor beats on
+# every fal poll (5s), so five minutes of silence means the thread is gone, not
+# that fal is slow. Cheap to be wrong in this direction: a late reap costs
+# latency, an early one pays twice for the same video.
 LEASE_TIMEOUT = timedelta(minutes=5)
 
 # Renders fail for transient reasons (interruption, OOM on a big frame count),
@@ -122,11 +121,11 @@ def enqueue_campaign(campaign_id: str) -> list[dict]:
 
 
 def claim(worker_id: str) -> dict | None:
-    """Lease the oldest queued job to a worker, or return None if idle.
+    """Lease the oldest queued job, or return None if idle.
 
-    The status filter in the update is the whole concurrency story: two workers
+    The status filter in the update is the whole concurrency story: two threads
     racing for the same row means one of them patches a row that is no longer
-    `queued` and gets nothing back, so it asks again.
+    `queued` and gets nothing back, so it moves on.
     """
     candidates = supabase.select(
         "render_jobs",
@@ -149,11 +148,11 @@ def claim(worker_id: str) -> dict | None:
 
 
 def heartbeat(job_id: str, worker_id: str) -> bool:
-    """Extend a lease. False means the lease is gone — the worker must stop.
+    """Extend a lease. False means it is gone and the caller must stop.
 
     Scoping to claimed_by matters: if this job was reaped and re-claimed while
-    the worker was busy, the beat must not steal it back from whoever holds it
-    now, and the worker needs to hear that it lost.
+    the render was running, the beat must not steal it back from whoever holds
+    it now.
     """
     updated = supabase.update(
         "render_jobs",
@@ -173,8 +172,7 @@ def complete(job_id: str, worker_id: str, video_path: str) -> dict | None:
                 "claimed_by": f"eq.{worker_id}"},
     )
     if not updated:
-        log.warning("[render] job %s completed by %s but the lease was gone",
-                    job_id, worker_id)
+        log.warning("[render] job %s finished but its lease was gone", job_id)
         return None
     return updated[0] if isinstance(updated, list) else updated
 
@@ -202,6 +200,75 @@ def fail(job_id: str, worker_id: str, reason: str) -> dict | None:
     log.warning("[render] job %s failed (attempt %d/%d): %s",
                 job_id, attempts, MAX_ATTEMPTS, reason[:120])
     return updated[0] if isinstance(updated, list) else updated
+
+
+def _fal_payload(job: dict) -> dict:
+    """Turn a shot brief into a fal request.
+
+    The brief is written for a human with a camera — "straight-down perspective,
+    an open sketchbook turned 45 degrees" — which is already close to what an
+    image-to-video model wants, so it goes through nearly as written rather than
+    being rewritten into keyword soup.
+    """
+    prompt = job.get("prompt") or {}
+    text = " ".join(x for x in (prompt.get("brief"), prompt.get("guidance")) if x)
+    return {
+        "prompt": text[:1500],
+        "aspect_ratio": job.get("aspect_ratio") or "9:16",
+        "duration": Config.FAL_VIDEO_SECONDS,
+    }
+
+
+class LeaseLost(RuntimeError):
+    """The job was reaped and re-claimed while this thread was rendering."""
+
+
+class UploadFailed(RuntimeError):
+    pass
+
+
+def process(job: dict, worker_id: str) -> None:
+    """Render one job end to end: submit, wait, store, mark done.
+
+    Runs in a background thread, so nothing here may raise past the caller. A
+    job that dies quietly is what the reaper is for; a job that fails loudly
+    should record why while it still can.
+    """
+    job_id = job["id"]
+    model = Config.FAL_VIDEO_MODEL
+    try:
+        request_id = fal.submit(model, _fal_payload(job))
+        log.info("[render] job %s submitted to %s as %s", job_id, model, request_id)
+
+        # Beat on every poll. A long queue at fal must not read as a dead
+        # thread — and if the lease has gone, stop rather than upload over
+        # whoever owns the job now.
+        def beat() -> None:
+            if not heartbeat(job_id, worker_id):
+                raise LeaseLost(job_id)
+
+        result = fal.wait(model, request_id, on_progress=beat)
+        video = fal.video_bytes(result)
+
+        # Campaign id first: the storage policy reads it to decide who may watch.
+        path = f"{job['campaign_id']}/{job_id}.mp4"
+        upload = supabase.signed_upload_url(BUCKET, path)
+        resp = requests.put(
+            upload["url"], data=video,
+            headers={"Content-Type": "video/mp4", "x-upsert": "true"}, timeout=600,
+        )
+        if resp.status_code >= 400:
+            raise UploadFailed(f"{resp.status_code} {resp.text[:200]}")
+
+        complete(job_id, worker_id, path)
+        log.info("[render] job %s done (%.1f MB)", job_id, len(video) / 1e6)
+
+    except LeaseLost:
+        # Someone else owns this now. Saying anything would only interfere.
+        log.warning("[render] job %s: lease lost mid-render, leaving it alone", job_id)
+    except Exception as e:
+        log.exception("[render] job %s failed", job_id)
+        fail(job_id, worker_id, f"{type(e).__name__}: {e}")
 
 
 def reap(now: datetime | None = None) -> int:
