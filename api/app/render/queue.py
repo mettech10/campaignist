@@ -219,6 +219,21 @@ _FIRST_SHOT = re.compile(r"(?:\(\s*1\s*\)|shot\s*1\s*:)(.*?)(?=\(\s*2\s*\)|shot\
                          re.I | re.S)
 
 
+_RATIO = re.compile(r"\d{1,2}\s*:\s*\d{1,2}")
+
+
+def aspect_ratio(raw: str) -> str:
+    """Pick one ratio a renderer can actually use.
+
+    formats.py describes founder-piece as "9:16 or 1:1" because a human
+    shooting it can choose. fal cannot, and passing the whole phrase through is
+    a request it has no way to honour. First one wins — the taxonomy lists the
+    preferred framing first.
+    """
+    found = _RATIO.findall(raw or "")
+    return found[0].replace(" ", "") if found else "9:16"
+
+
 def first_shot(brief: str) -> str:
     """Reduce a multi-shot brief to the one shot a single clip can be.
 
@@ -260,7 +275,7 @@ def _fal_payload(job: dict) -> dict:
     )
     return {
         "prompt": text[:1500],
-        "aspect_ratio": job.get("aspect_ratio") or "9:16",
+        "aspect_ratio": aspect_ratio(job.get("aspect_ratio") or ""),
         "duration": Config.FAL_VIDEO_SECONDS,
     }
 

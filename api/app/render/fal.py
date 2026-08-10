@@ -36,6 +36,18 @@ POLL_EVERY = 5
 HTTP_TIMEOUT = 60
 
 
+def app_id(model: str) -> str:
+    """The id the queue endpoints are addressed by.
+
+    You submit to the full model path — fal-ai/wan-25-preview/text-to-video —
+    but status and result live under the *app*, fal-ai/wan-25-preview. Polling
+    the full path returns 405 Method Not Allowed, which reads like a broken
+    request rather than a wrong URL.
+    """
+    parts = [p for p in model.split("/") if p]
+    return "/".join(parts[:2])
+
+
 def _headers() -> dict:
     key = Config.FAL_KEY
     if not key:
@@ -63,7 +75,8 @@ def wait(model: str, request_id: str, *, on_progress=None) -> dict:
     a render that takes ten minutes must not look like a dead worker.
     """
     deadline = time.monotonic() + TIMEOUT
-    status_url = f"{QUEUE_HOST}/{model}/requests/{request_id}/status"
+    base = app_id(model)
+    status_url = f"{QUEUE_HOST}/{base}/requests/{request_id}/status"
 
     while time.monotonic() < deadline:
         time.sleep(POLL_EVERY)
@@ -77,7 +90,7 @@ def wait(model: str, request_id: str, *, on_progress=None) -> dict:
         status = resp.json().get("status")
         if status == "COMPLETED":
             result = requests.get(
-                f"{QUEUE_HOST}/{model}/requests/{request_id}",
+                f"{QUEUE_HOST}/{base}/requests/{request_id}",
                 headers=_headers(), timeout=HTTP_TIMEOUT,
             )
             if result.status_code >= 400:

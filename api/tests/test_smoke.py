@@ -1013,3 +1013,24 @@ def test_a_montage_brief_is_reduced_to_one_shot():
               "paused in the bakery doorway. Static camera, no movement. "
               "One continuous shot.")
     assert first_shot(single) == single
+
+
+def test_queue_endpoints_are_addressed_by_app_id_not_model_path():
+    """You submit to the full model path but poll the app. Polling the full
+    path returns 405, which reads like a broken request rather than a wrong
+    URL — it cost three attempts and a failed job to find."""
+    from app.render.fal import app_id
+
+    assert app_id("fal-ai/wan-25-preview/text-to-video") == "fal-ai/wan-25-preview"
+    assert app_id("fal-ai/flux/dev") == "fal-ai/flux"
+    assert app_id("fal-ai/kling-video") == "fal-ai/kling-video"
+
+
+def test_a_format_offering_two_aspect_ratios_resolves_to_one():
+    """founder-piece is "9:16 or 1:1" because a human shooting it can choose.
+    A renderer cannot, and the whole phrase is not a request fal can honour."""
+    from app.render.queue import aspect_ratio
+
+    assert aspect_ratio("9:16 or 1:1") == "9:16"
+    assert aspect_ratio("16:9") == "16:9"
+    assert aspect_ratio("") == "9:16"
