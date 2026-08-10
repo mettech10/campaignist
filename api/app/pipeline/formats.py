@@ -8,6 +8,17 @@ backend stores on content_assets.format.
 Campaignist writes the brief; it does not render video or images.
 """
 
+# Video guidance describes ONE continuous clip of roughly six seconds, because
+# that is now what happens to it: these formats are rendered by a text-to-video
+# model, not handed to a crew. The guidance used to ask for beat sheets,
+# timecodes, cuts and 30-60 second takes, which is direction for a person with
+# an editor — and the first real render showed the cost, a still-life read of a
+# brief that said "lifestyle photography style, soft focus background" and named
+# no motion at all.
+#
+# It is also better direction for a small business owner filming on a phone. An
+# eight-shot montage they will never cut is worth less than one shot they can
+# actually get.
 FORMATS: dict[str, dict] = {
     # ── video ───────────────────────────────────────────────────────────────
     "ugc-testimonial": {
@@ -15,10 +26,14 @@ FORMATS: dict[str, dict] = {
         "category": "video",
         "aspect_ratio": "9:16",
         "brief_guidance": (
-            "Write a shot-by-shot beat sheet with timecodes. Specify handheld phone "
-            "framing, available light, and where the cut lands. The speaker must sound "
-            "like a customer, never like ad copy. Do not invent a named person or a "
-            "quote attributed to a real customer — describe the person generically."
+            "One continuous shot of about six seconds, described as a single "
+            "moment. Handheld phone framing, available light, one person "
+            "talking straight to camera. Say what moves in frame and what the "
+            "camera does — holds still, drifts a little. No cuts, no "
+            "timecodes, no beat sheet: this is rendered as one clip and there "
+            "is no editor. The speaker must sound like a customer, never like "
+            "ad copy. Do not invent a named person or a quote attributed to a "
+            "real customer — describe the person generically."
         ),
     },
     "ugc-demo": {
@@ -26,8 +41,11 @@ FORMATS: dict[str, dict] = {
         "category": "video",
         "aspect_ratio": "9:16",
         "brief_guidance": (
-            "Hands-only or over-the-shoulder. Beat sheet with a cut on each action. "
-            "Under 20 seconds. End on the product doing the thing that was promised."
+            "One continuous shot of about six seconds. Hands-only or "
+            "over-the-shoulder, with a single action starting and finishing on "
+            "camera. Say what the hands do, what the product does, and what "
+            "the camera does. No cuts — one clip, one action, ending on the "
+            "product doing the thing that was promised."
         ),
     },
     "founder-piece": {
@@ -35,8 +53,11 @@ FORMATS: dict[str, dict] = {
         "category": "video",
         "aspect_ratio": "9:16 or 1:1",
         "brief_guidance": (
-            "A cue card the owner can read. Open on the claim, not a greeting. One "
-            "take, 30-60 seconds, no jump cuts."
+            "One continuous shot of about six seconds: the owner, static "
+            "camera or a slow push in. Say where they are, what is behind "
+            "them, what they do with their hands, and whether they look at the "
+            "lens. Open on the claim, not a greeting. Six seconds is one "
+            "sentence, so pick the sentence."
         ),
     },
     "b-roll-montage": {
@@ -44,8 +65,11 @@ FORMATS: dict[str, dict] = {
         "category": "video",
         "aspect_ratio": "9:16",
         "brief_guidance": (
-            "Six to eight shots at ~2s each, listed in order, plus grade and music "
-            "direction. Name the beat the hero shot cuts to."
+            "Six to eight shots at ~2s each, numbered and in order, plus grade "
+            "and music direction. Each numbered shot is rendered on its own, "
+            "so each must stand alone as one continuous moment with its own "
+            "subject, motion and camera direction — no shot may rely on the "
+            "one before it. Name the beat the hero shot cuts to."
         ),
     },
     # ── image ───────────────────────────────────────────────────────────────

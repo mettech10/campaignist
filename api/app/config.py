@@ -129,8 +129,12 @@ class Config:
     # nothing at all when idle. Break-even was somewhere near 450 clips a
     # month, which is a long way from where this product is.
     FAL_KEY = _opt("FAL_KEY")
-    FAL_VIDEO_MODEL = _opt("FAL_VIDEO_MODEL", "fal-ai/wan-25-preview/text-to-video")
-    FAL_VIDEO_SECONDS = int(_opt("FAL_VIDEO_SECONDS", "5"))
+    # Veo, on evidence rather than a pricing table. Side by side on the same brief
+    # it followed direction better and rendered in 48s against wan's 213s — the
+    # premium model is the faster one, so cost is the only trade.
+    FAL_VIDEO_MODEL = _opt("FAL_VIDEO_MODEL", "fal-ai/veo3/fast")
+    # Veo allows 4, 6 or 8; other models take any integer. See render.queue.
+    FAL_VIDEO_SECONDS = int(_opt("FAL_VIDEO_SECONDS", "6"))
 
     # ── Stripe ──────────────────────────────────────────────────────────────
     STRIPE_SECRET_KEY = _opt("STRIPE_SECRET_KEY")

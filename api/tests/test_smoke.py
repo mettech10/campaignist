@@ -963,7 +963,8 @@ def test_the_brief_reaches_fal_intact(monkeypatch):
     payload = queue._fal_payload(job)
     assert "sketchbook" in payload["prompt"]
     assert payload["aspect_ratio"] == "9:16"
-    assert isinstance(payload["duration"], int)
+    # Spelled per model: Veo wants "6s", wan wants 6. Either is a duration.
+    assert payload["duration"] in (6, "6s")
 
 
 def test_a_render_can_be_limited_to_one(monkeypatch):
@@ -1080,3 +1081,45 @@ def test_clip_length_is_spelled_the_way_each_model_expects():
 
     # Anything else keeps the plain integer that wan accepts.
     assert duration_field("fal-ai/wan-25-preview/text-to-video", 5) == {"duration": 5}
+
+
+def test_video_briefs_ask_for_one_clip_not_an_edit():
+    """These formats are rendered by a video model now. The guidance used to
+    ask for beat sheets, timecodes and 30-60 second takes — direction for a
+    person with an editor — and the first real render came back as a still-life
+    because the brief described a photograph."""
+    from app.pipeline.formats import FORMATS
+
+    for fid, fmt in FORMATS.items():
+        if fmt["category"] != "video":
+            continue
+        guidance = fmt["brief_guidance"].lower()
+
+        # Assert on what is *asked for*, not on which words appear. The first
+        # version of this test failed the new guidance for containing
+        # "timecode" — in the phrase "no timecodes". A bare substring cannot
+        # tell a demand from a prohibition.
+        for asked in ("write a shot-by-shot beat sheet",
+                      "beat sheet with a cut",
+                      "30-60 seconds",
+                      "under 20 seconds"):
+            assert asked not in guidance, f"{fid} still asks for {asked!r}"
+
+        assert "continuous" in guidance or "stand alone" in guidance, (
+            f"{fid} does not say the shot must be one continuous moment")
+
+
+def test_the_copy_agent_is_told_video_is_rendered_not_filmed():
+    """Nothing in this prompt knew these formats stopped being shot by a crew.
+    That is where 'lifestyle photography style, soft focus background' came
+    from, and a brief describing a photograph renders as one."""
+    import json
+    from pathlib import Path
+
+    spec = json.loads(
+        (Path(__file__).resolve().parents[1] / "app/pipeline/specs/copy_social.json").read_text()
+    )
+    system = spec["system"].lower()
+    assert "photography style" in system, "the banned phrase must be named to be banned"
+    assert "single continuous clip" in system
+    assert "no editor" in system
