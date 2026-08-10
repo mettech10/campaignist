@@ -54,12 +54,16 @@ def _parse(ts: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def enqueue_campaign(campaign_id: str) -> list[dict]:
+def enqueue_campaign(campaign_id: str, *, limit: int | None = None) -> list[dict]:
     """Queue a render for every video asset in a campaign.
 
     Idempotent by construction: a partial unique index allows only one live job
     per asset, so calling this twice queues nothing the second time rather than
     paying to render everything again.
+
+    `limit` renders a few and leaves the rest queued for later. Every clip costs
+    real money now, so committing to twenty before seeing one is a bad default;
+    the endpoint exposes this so someone can look before they buy the set.
     """
     assets = supabase.select(
         "content_assets",
@@ -100,6 +104,9 @@ def enqueue_campaign(campaign_id: str) -> list[dict]:
                 "guidance": fmt.get("brief_guidance", ""),
             },
         })
+
+    if limit is not None:
+        rows = rows[:max(0, limit)]
 
     if not rows:
         return []

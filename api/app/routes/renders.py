@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, g, jsonify
+from flask import Blueprint, g, jsonify, request
 
 from .. import supabase
 from ..auth import require_auth
@@ -24,12 +24,22 @@ bp = Blueprint("renders", __name__)
 @bp.post("/api/campaigns/<campaign_id>/renders")
 @require_auth
 def start_renders(campaign_id: str):
-    """Queue renders for every video asset in a campaign."""
+    """Queue renders for a campaign's video assets.
+
+    `?limit=N` renders only the first N. Rendering costs money per clip, so
+    trying one before committing to the whole set is worth one query parameter.
+    """
     campaign = supabase.campaign_for_user(campaign_id, g.user_id)
     if not campaign:
         return jsonify(error="not_found"), 404
 
-    queued = render_queue.enqueue_campaign(campaign_id)
+    raw = request.args.get("limit")
+    try:
+        limit = max(1, int(raw)) if raw is not None else None
+    except ValueError:
+        return jsonify(error="limit must be a number"), 400
+
+    queued = render_queue.enqueue_campaign(campaign_id, limit=limit)
     # Kick the drain thread. Idempotent — if one is already running it returns
     # immediately, and it picks up anything queued while it was working.
     render_runner.start()

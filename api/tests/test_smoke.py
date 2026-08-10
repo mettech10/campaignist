@@ -964,3 +964,24 @@ def test_the_brief_reaches_fal_intact(monkeypatch):
     assert "sketchbook" in payload["prompt"]
     assert payload["aspect_ratio"] == "9:16"
     assert isinstance(payload["duration"], int)
+
+
+def test_a_render_can_be_limited_to_one(monkeypatch):
+    """Every clip costs money, so committing to a whole campaign's worth before
+    seeing one is a bad default."""
+    from app.render import queue
+
+    inserted = []
+    monkeypatch.setattr(queue.supabase, "insert",
+                        lambda t, rows: inserted.extend(rows) or rows)
+    monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
+        [{"id": f"a{i}", "format": "b-roll-montage", "content": {}, "image_brief": "b"}
+         for i in range(5)] if table == "content_assets" else []
+    ))
+
+    queue.enqueue_campaign("c1", limit=1)
+    assert len(inserted) == 1
+
+    inserted.clear()
+    queue.enqueue_campaign("c1")
+    assert len(inserted) == 5, "no limit should still queue everything"
