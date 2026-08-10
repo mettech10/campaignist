@@ -56,7 +56,8 @@ def _parse(ts: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def enqueue_campaign(campaign_id: str, *, limit: int | None = None) -> list[dict]:
+def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
+                     model: str | None = None) -> list[dict]:
     """Queue a render for every video asset in a campaign.
 
     Idempotent by construction: a partial unique index allows only one live job
@@ -66,6 +67,11 @@ def enqueue_campaign(campaign_id: str, *, limit: int | None = None) -> list[dict
     `limit` renders a few and leaves the rest queued for later. Every clip costs
     real money now, so committing to twenty before seeing one is a bad default;
     the endpoint exposes this so someone can look before they buy the set.
+
+    `model` overrides the configured one for these jobs. Models differ by an
+    order of magnitude in both price and how closely they follow direction, and
+    that is not a judgement to make from a pricing table — it rides on the job
+    so the same brief can be compared across models.
     """
     assets = supabase.select(
         "content_assets",
@@ -99,6 +105,7 @@ def enqueue_campaign(campaign_id: str, *, limit: int | None = None) -> list[dict
             # Denormalised so the worker renders from one self-contained
             # payload and never needs a second call to find out what to make.
             "prompt": {
+                **({"model": model} if model else {}),
                 "brief": asset.get("image_brief") or "",
                 "hook": content.get("hook", ""),
                 "cta": content.get("cta", ""),
@@ -296,7 +303,7 @@ def process(job: dict, worker_id: str) -> None:
     should record why while it still can.
     """
     job_id = job["id"]
-    model = Config.FAL_VIDEO_MODEL
+    model = (job.get("prompt") or {}).get("model") or Config.FAL_VIDEO_MODEL
     try:
         request_id = fal.submit(model, _fal_payload(job))
         log.info("[render] job %s submitted to %s as %s", job_id, model, request_id)

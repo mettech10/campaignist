@@ -1034,3 +1034,34 @@ def test_a_format_offering_two_aspect_ratios_resolves_to_one():
     assert aspect_ratio("9:16 or 1:1") == "9:16"
     assert aspect_ratio("16:9") == "16:9"
     assert aspect_ratio("") == "9:16"
+
+
+def test_a_job_can_override_the_configured_model(monkeypatch):
+    """Models differ by an order of magnitude in price and in how closely they
+    follow direction. Comparing them on the same brief beats picking one from a
+    pricing table, which is how the first one got chosen."""
+    from app.render import queue
+
+    inserted = []
+    monkeypatch.setattr(queue.supabase, "insert",
+                        lambda t, rows: inserted.extend(rows) or rows)
+    monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
+        [{"id": "a1", "format": "founder-piece", "content": {}, "image_brief": "b"}]
+        if table == "content_assets" else []))
+
+    queue.enqueue_campaign("c1", model="fal-ai/veo3/fast")
+    assert inserted[0]["prompt"]["model"] == "fal-ai/veo3/fast"
+
+    submitted = []
+    monkeypatch.setattr(queue.fal, "submit",
+                        lambda model, payload: submitted.append(model) or "req-1")
+    monkeypatch.setattr(queue, "heartbeat", lambda *a: True)
+    monkeypatch.setattr(queue.fal, "wait", lambda *a, **kw: {})
+    monkeypatch.setattr(queue.fal, "video_bytes", lambda r: b"x")
+    monkeypatch.setattr(queue.supabase, "signed_upload_url", lambda b, p: {"url": "http://x"})
+    monkeypatch.setattr(queue.requests, "put",
+                        lambda *a, **kw: type("R", (), {"status_code": 200})())
+    monkeypatch.setattr(queue, "complete", lambda *a: None)
+
+    queue.process(inserted[0] | {"id": "j1", "campaign_id": "c1"}, "w1")
+    assert submitted == ["fal-ai/veo3/fast"], "the job's model was ignored"
