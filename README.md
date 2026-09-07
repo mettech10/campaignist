@@ -247,11 +247,10 @@ rather than on hunting broken references.
    hold the same v0 scaffold. The product is called Campaignist everywhere, so
    the former is the misnomer — but it is the one v0 pushes to and the one
    `web/` tracks.
-3. **Stuck generations.** A campaign whose worker died mid-run stays
-   `generating` with no timeout and no refund. Cheapest fix is a stale-campaign
-   check on the polling GET: if `status = generating` and `created_at` is older
-   than a few minutes with no new `pipeline_outputs` key, mark it `error` and
-   return the credit. Rare on starter (deploys only), but needed before beta
-   users since it currently costs them a credit with no recovery.
+3. **Stuck generations.** Solved by `progress_at` + `api/app/pipeline/reaper.py`
+   (migration `0002_stalled_generations.sql`). Polling GET and the campaign list
+   both reap silent `generating` rows after 12 minutes and refund via
+   `refund_credit`. Regenerate must refresh `progress_at` or a fresh run looks
+   stale immediately — do not drop that bump.
 4. **Backend repo.** `api/` is untracked. `render.yaml` sets `rootDir: api`, so
    either a monorepo or its own repo works.
