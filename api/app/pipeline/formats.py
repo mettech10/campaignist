@@ -93,7 +93,20 @@ FORMATS: dict[str, dict] = {
             "not generated frame-by-frame by a video model."
         ),
     },
+    "hook-demo": {
+        "label": "Hook + Demo",
+        "category": "video",
+        "production": "remix",
+        "aspect_ratio": "9:16",
+        "brief_guidance": (
+            "Open on a bold text hook for ~2 seconds, then cut to one continuous "
+            "owned product/demo clip (~8–12s), ending on a clear CTA. The demo "
+            "footage must be the business's own (phone, screen recording, or "
+            "licensed stock) — never another creator's TikTok file."
+        ),
+    },
     "motion-design": {
+
         "label": "Motion Design",
         "category": "video",
         "production": "generate",
