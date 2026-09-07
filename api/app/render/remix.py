@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import requests
 
 from .. import supabase
-from . import queue, slideshow, tiktok_pattern
+from . import hook_demo, queue, slideshow, tiktok_pattern
 
 log = logging.getLogger(__name__)
 
@@ -167,4 +167,139 @@ def remix_slideshow(
         "caption": "\n\n".join(
             p for p in (content["hook"], content["body"], content["cta"]) if p
         ),
+    }
+
+
+def remix_hook_demo(
+    campaign_id: str,
+    *,
+    business: dict,
+    source_url: str,
+    pattern_id: str | None = None,
+    builtin_id: str | None = None,
+    hook: str | None = None,
+    cta: str | None = None,
+    hook_seconds: float = 2.2,
+    demo_seconds: float = 10.0,
+    channel: str = "tiktok",
+) -> dict:
+    """Hook card + owned demo clip → ready-to-post mp4."""
+    if not (source_url or "").strip():
+        raise RemixError("source_url_required")
+
+    pattern = resolve_pattern(
+        campaign_id,
+        pattern_id=pattern_id,
+        builtin_id=builtin_id or "builtin:hook-demo-open",
+    )
+    name = business.get("name") or "Your business"
+    offer = business.get("offer_description") or business.get("industry") or name
+    hook_line = (hook or pattern.get("hook") or f"See how {name} works").strip()
+    cta_line = (cta or f"Try {name}").strip()
+
+    source_bytes = hook_demo.fetch_source(source_url.strip())
+    video = hook_demo.build_hook_demo_bytes(
+        hook=hook_line,
+        cta=cta_line,
+        source_bytes=source_bytes,
+        hook_seconds=hook_seconds,
+        demo_seconds=demo_seconds,
+    )
+
+    content = {
+        "hook": hook_line,
+        "body": offer,
+        "cta": cta_line,
+        "hashtags": pattern.get("hashtags") or [],
+        "format_family": "hook_demo",
+        "pattern_source": pattern.get("source_url"),
+        "source_url": source_url.strip(),
+        "segments": [
+            {"role": "hook", "seconds": hook_seconds, "text": hook_line},
+            {"role": "demo", "seconds": demo_seconds, "text": offer},
+            {"role": "cta", "text": cta_line},
+        ],
+    }
+
+    asset = supabase.insert(
+        "content_assets",
+        {
+            "campaign_id": campaign_id,
+            "type": "social_post",
+            "channel": channel,
+            "format": "hook-demo",
+            "variant": 1,
+            "content": content,
+            "image_brief": "Hook card + owned demo clip remixed from market pattern",
+            "status": "generated",
+        },
+    )
+    asset = asset[0] if isinstance(asset, list) else asset
+
+    job = supabase.insert(
+        "render_jobs",
+        {
+            "asset_id": asset["id"],
+            "campaign_id": campaign_id,
+            "format": "hook-demo",
+            "aspect_ratio": "9:16",
+            "prompt": {
+                "mode": "remix_hook_demo",
+                "pattern": pattern,
+                "source_url": source_url.strip(),
+                "hook": hook_line,
+                "cta": cta_line,
+            },
+            "status": "claimed",
+            "claimed_by": "remix-inline",
+            "claimed_at": _now(),
+            "progress_at": _now(),
+        },
+    )
+    job = job[0] if isinstance(job, list) else job
+
+    path = f"{campaign_id}/{job['id']}.mp4"
+    upload = supabase.signed_upload_url(queue.BUCKET, path)
+    put = requests.put(
+        upload["url"],
+        data=video,
+        headers={"Content-Type": "video/mp4", "x-upsert": "true"},
+        timeout=600,
+    )
+    if put.status_code >= 400:
+        supabase.update(
+            "render_jobs",
+            {"status": "error", "error": f"upload_failed:{put.status_code}"},
+            params={"id": f"eq.{job['id']}"},
+            returning=False,
+        )
+        raise RemixError(f"upload_failed:{put.status_code}")
+
+    done = supabase.update(
+        "render_jobs",
+        {
+            "status": "done",
+            "video_path": path,
+            "error": None,
+            "progress_at": _now(),
+            "updated_at": _now(),
+            "claimed_by": None,
+        },
+        params={"id": f"eq.{job['id']}"},
+    )
+    done = done[0] if isinstance(done, list) else done
+
+    video_url = None
+    try:
+        video_url = supabase.signed_download_url(queue.BUCKET, path)
+    except Exception as e:
+        log.warning("[remix] hook-demo sign failed: %s", e)
+
+    return {
+        "asset": asset,
+        "job": done or job,
+        "segments": content["segments"],
+        "video_url": video_url,
+        "ready": bool(video_url),
+        "caption": "\n\n".join([p for p in (hook_line, offer, cta_line) if p]),
     }
