@@ -1435,3 +1435,33 @@ def test_remix_formats_include_slideshow():
 
     assert "slideshow" in formats.REMIX
     assert formats.FORMATS["slideshow"]["production"] == "remix"
+
+# ── Phase 2: hook + demo remix ──────────────────────────────────────────────
+
+def test_hook_demo_format_is_remix():
+    from app.pipeline import formats
+
+    assert "hook-demo" in formats.REMIX
+    assert formats.FORMATS["hook-demo"]["production"] == "remix"
+
+
+def test_hook_demo_concat(tmp_path):
+    import subprocess
+    from pathlib import Path
+
+    from app.render import hook_demo
+
+    src = tmp_path / "in.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=640x360:d=3",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    out = hook_demo.build_hook_demo_bytes(
+        hook="Stop guessing your ads",
+        cta="Try Campaignist",
+        source_bytes=src.read_bytes(),
+        hook_seconds=1.5,
+        demo_seconds=2.5,
+    )
+    assert len(out) > 2000

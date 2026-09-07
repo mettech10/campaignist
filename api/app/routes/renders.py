@@ -279,3 +279,63 @@ def remix_slideshow(campaign_id: str):
         return jsonify(error="remix_failed", detail=str(e)), 500
 
     return jsonify(result), 201
+
+
+@bp.post("/api/campaigns/<campaign_id>/remix/hook-demo")
+@require_auth
+def remix_hook_demo(campaign_id: str):
+    """Hook card + owned demo clip remixed from a market pattern.
+
+    Body:
+    {
+      "source_url": "https://…/owned-demo.mp4",   # required — owned/licensed
+      "builtin_id": "builtin:hook-demo-open",
+      "pattern_id": "<uuid>",
+      "hook": "...",
+      "cta": "...",
+      "hook_seconds": 2.2,
+      "demo_seconds": 10,
+      "channel": "tiktok"
+    }
+    """
+    campaign = supabase.campaign_for_user(campaign_id, g.user_id)
+    if not campaign:
+        return jsonify(error="not_found"), 404
+
+    business = supabase.select(
+        "businesses",
+        params={"id": f"eq.{campaign['business_id']}"},
+        single=True,
+    ) or {}
+
+    body = request.get_json(silent=True) or {}
+    source_url = (body.get("source_url") or "").strip()
+    if not source_url:
+        return jsonify(error="source_url_required"), 400
+
+    try:
+        hook_seconds = float(body.get("hook_seconds") or 2.2)
+        demo_seconds = float(body.get("demo_seconds") or 10)
+    except (TypeError, ValueError):
+        return jsonify(error="seconds_must_be_numbers"), 400
+
+    try:
+        result = remix.remix_hook_demo(
+            campaign_id,
+            business=business,
+            source_url=source_url,
+            pattern_id=(body.get("pattern_id") or "").strip() or None,
+            builtin_id=(body.get("builtin_id") or "").strip() or None,
+            hook=(body.get("hook") or "").strip() or None,
+            cta=(body.get("cta") or "").strip() or None,
+            hook_seconds=max(1.0, min(hook_seconds, 5.0)),
+            demo_seconds=max(3.0, min(demo_seconds, 45.0)),
+            channel=(body.get("channel") or "tiktok").strip() or "tiktok",
+        )
+    except remix.RemixError as e:
+        return jsonify(error="remix_failed", detail=str(e)), 422
+    except Exception as e:
+        log.exception("[remix] hook-demo failed")
+        return jsonify(error="remix_failed", detail=str(e)), 500
+
+    return jsonify(result), 201
