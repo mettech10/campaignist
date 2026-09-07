@@ -1377,3 +1377,61 @@ def test_adapt_ffmpeg_writes_an_mp4(tmp_path):
     )
     adapt.adapt_file(src, dest, overlay="Hook line", cta="Book now", seconds=2)
     assert dest.stat().st_size > 1000
+
+# ── Phase 1: pattern library + slideshow remix ──────────────────────────────
+
+def test_builtin_slideshow_templates_exist():
+    from app.render import tiktok_pattern
+
+    templates = tiktok_pattern.list_builtins(family="slideshow")
+    assert len(templates) >= 2
+    assert all(t["pattern"]["format_family"] == "slideshow" for t in templates)
+
+
+def test_extract_pattern_includes_rebuild_fields():
+    from app.render import tiktok_pattern
+
+    pattern = tiktok_pattern.extract_pattern(
+        {
+            "type": "video",
+            "title": "Stop wasting money on ads #Shopify #Ecommerce",
+            "author_name": "Growth",
+            "author_url": "https://www.tiktok.com/@growth",
+            "thumbnail_url": "https://example.com/t.jpg",
+            "provider_name": "TikTok",
+        },
+        source_url="https://www.tiktok.com/@growth/video/1",
+    )
+    assert pattern["format_family"] in tiktok_pattern.FORMAT_FAMILIES
+    assert pattern["hook_style"]
+    assert pattern["caption_rhythm"]
+    assert "Stop wasting money" in pattern["hook"]
+
+
+def test_slideshow_build_and_render(tmp_path):
+    from app.render import slideshow, tiktok_pattern
+
+    pattern = tiktok_pattern.builtin_by_id(
+        "builtin:slideshow-problem-agitate-solve"
+    )["pattern"]
+    slides = slideshow.build_slide_copy(
+        pattern=pattern,
+        business_name="Hearth & Crumb",
+        offer="wedding cakes in Manchester",
+        points=["Quotes take weeks", "Hidden fees everywhere"],
+        cta="Book a tasting",
+    )
+    assert len(slides) == 5
+    assert slides[0]["role"] == "hook"
+    assert slides[-1]["role"] == "cta"
+
+    dest = tmp_path / "out.mp4"
+    slideshow.render_slideshow_mp4(slides, dest, seconds_per_slide=1.5)
+    assert dest.stat().st_size > 1000
+
+
+def test_remix_formats_include_slideshow():
+    from app.pipeline import formats
+
+    assert "slideshow" in formats.REMIX
+    assert formats.FORMATS["slideshow"]["production"] == "remix"
