@@ -257,6 +257,16 @@ API surface:
 
 Apply migration `supabase/migrations/0004_tiktok_patterns.sql`.
 
+### Phase 1 — pattern library + slideshow remix
+
+- Builtin templates: `GET /api/pattern-templates`
+- Ingest TikTok URL pattern (structure only): `POST /api/campaigns/<id>/tiktok-patterns`
+- Remix slideshow (ffmpeg cards → mp4 + slide JSON): `POST /api/campaigns/<id>/remix/slideshow`
+- Apply migration `0005_trend_patterns.sql` (indexed `format_family` / `hook_style`)
+
+Slideshow is the cheap volume format (Fastlane-shaped). Hook+demo and meme rebuilds come next; fal stays gated to product UGC + motion-design.
+
+
 ## Open decisions
 
 

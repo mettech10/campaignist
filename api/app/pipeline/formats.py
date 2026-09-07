@@ -81,6 +81,18 @@ FORMATS: dict[str, dict] = {
             "one before it. Name the beat the hero shot cuts to."
         ),
     },
+    "slideshow": {
+        "label": "Slideshow / Photo cards",
+        "category": "video",
+        "production": "remix",
+        "aspect_ratio": "9:16",
+        "brief_guidance": (
+            "A sequence of 4–7 full-screen text cards (TikTok Photo Mode energy). "
+            "Each card is one short line: hook, points, then CTA. No live action. "
+            "This is the cheapest volume format — rebuilt from a market pattern, "
+            "not generated frame-by-frame by a video model."
+        ),
+    },
     "motion-design": {
         "label": "Motion Design",
         "category": "video",
@@ -198,6 +210,8 @@ GENERATE = [k for k, v in FORMATS.items()
             if v["category"] == "video" and v.get("production") == "generate"]
 ADAPT = [k for k, v in FORMATS.items()
          if v["category"] == "video" and v.get("production") == "adapt"]
+REMIX = [k for k, v in FORMATS.items()
+         if v["category"] == "video" and v.get("production") == "remix"]
 
 
 def catalogue_for_prompt() -> str:
