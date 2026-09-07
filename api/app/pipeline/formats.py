@@ -5,7 +5,11 @@ art-direction brief in the chosen format's idiom. Keep the ids in sync with the
 frontend file: the frontend renders the label and aspect ratio from the id the
 backend stores on content_assets.format.
 
-Campaignist writes the brief; it does not render video or images.
+Video production modes (Metalyzi cost model):
+  * adapt — default for market-pattern work. Pull a TikTok *pattern* (oEmbed
+    metadata), then ffmpeg-edit an owned/uploaded source to match. Cheap.
+  * generate — fal text-to-video. Reserved for product-specific UGC and
+    motion-design. Do not use as the default for every vertical clip.
 """
 
 # Video guidance describes ONE continuous clip of roughly six seconds, because
@@ -24,6 +28,7 @@ FORMATS: dict[str, dict] = {
     "ugc-testimonial": {
         "label": "UGC Testimonial",
         "category": "video",
+        "production": "generate",
         "aspect_ratio": "9:16",
         "brief_guidance": (
             "One continuous shot of about six seconds, described as a single "
@@ -39,6 +44,7 @@ FORMATS: dict[str, dict] = {
     "ugc-demo": {
         "label": "UGC Demo / Unboxing",
         "category": "video",
+        "production": "generate",
         "aspect_ratio": "9:16",
         "brief_guidance": (
             "One continuous shot of about six seconds. Hands-only or "
@@ -51,6 +57,8 @@ FORMATS: dict[str, dict] = {
     "founder-piece": {
         "label": "Founder Piece to Camera",
         "category": "video",
+        # Prefer adapting the owner's own phone footage to a market pattern.
+        "production": "adapt",
         "aspect_ratio": "9:16 or 1:1",
         "brief_guidance": (
             "One continuous shot of about six seconds: the owner, static "
@@ -63,6 +71,7 @@ FORMATS: dict[str, dict] = {
     "b-roll-montage": {
         "label": "B-Roll Montage",
         "category": "video",
+        "production": "adapt",
         "aspect_ratio": "9:16",
         "brief_guidance": (
             "Six to eight shots at ~2s each, numbered and in order, plus grade "
@@ -70,6 +79,19 @@ FORMATS: dict[str, dict] = {
             "so each must stand alone as one continuous moment with its own "
             "subject, motion and camera direction — no shot may rely on the "
             "one before it. Name the beat the hero shot cuts to."
+        ),
+    },
+    "motion-design": {
+        "label": "Motion Design",
+        "category": "video",
+        "production": "generate",
+        "aspect_ratio": "9:16",
+        "brief_guidance": (
+            "One continuous motion-graphics clip of about six to eight seconds. "
+            "Describe kinetic typography, product UI, or abstract brand shapes "
+            "moving on a clean background — not a live-action person. Name the "
+            "palette, the type treatment, what enters and exits frame, and the "
+            "final end-card with the product name. No cuts: one rendered take."
         ),
     },
     # ── image ───────────────────────────────────────────────────────────────
@@ -171,13 +193,22 @@ FORMATS: dict[str, dict] = {
 VIDEO = [k for k, v in FORMATS.items() if v["category"] == "video"]
 IMAGE = [k for k, v in FORMATS.items() if v["category"] == "image"]
 TEXT = [k for k, v in FORMATS.items() if v["category"] == "text"]
+# fal text-to-video is only for these. Everything else adapts a real source.
+GENERATE = [k for k, v in FORMATS.items()
+            if v["category"] == "video" and v.get("production") == "generate"]
+ADAPT = [k for k, v in FORMATS.items()
+         if v["category"] == "video" and v.get("production") == "adapt"]
 
 
 def catalogue_for_prompt() -> str:
     """Compact catalogue injected into the Step 3 and Step 4 prompts."""
     lines = []
     for fid, f in FORMATS.items():
-        lines.append(f"- {fid} ({f['category']}, {f['aspect_ratio']}): {f['label']}")
+        prod = f.get("production")
+        prod_bit = f", {prod}" if prod else ""
+        lines.append(
+            f"- {fid} ({f['category']}{prod_bit}, {f['aspect_ratio']}): {f['label']}"
+        )
     return "\n".join(lines)
 
 
