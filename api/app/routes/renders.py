@@ -15,7 +15,7 @@ from flask import Blueprint, g, jsonify, request
 from .. import supabase
 from ..auth import require_auth
 from ..render import queue as render_queue, ready as render_ready, runner as render_runner
-from ..render import tiktok_pattern
+from ..render import remix, tiktok_pattern
 from ..pipeline import formats
 
 log = logging.getLogger(__name__)
@@ -132,8 +132,15 @@ def ingest_tiktok_pattern(campaign_id: str):
 
     row = supabase.insert(
         "tiktok_patterns",
-        {"campaign_id": campaign_id, "source_url": pattern["source_url"],
-         "oembed": oembed, "pattern": pattern},
+        {
+            "campaign_id": campaign_id,
+            "source_url": pattern["source_url"],
+            "oembed": oembed,
+            "pattern": pattern,
+            "format_family": pattern.get("format_family"),
+            "hook_style": pattern.get("hook_style"),
+            "niche_tags": pattern.get("niche_tags") or [],
+        },
     )
     return jsonify(pattern=row), 201
 
@@ -211,8 +218,64 @@ def video_production_modes():
     return jsonify(
         generate=formats.GENERATE,
         adapt=formats.ADAPT,
+        remix=formats.REMIX,
+        builtins=tiktok_pattern.list_builtins(),
         note=(
-            "Generate (fal) is for product UGC and motion-design only. "
-            "Adapt applies a TikTok market pattern to an owned source via ffmpeg."
+            "Remix (slideshow) is the cheap Fastlane-shaped default. "
+            "Adapt = ffmpeg on owned footage. Generate (fal) = product UGC + motion only."
         ),
     )
+
+
+@bp.get("/api/pattern-templates")
+@require_auth
+def pattern_templates():
+    """Builtin rebuild templates (starter library) + optional family filter."""
+    family = (request.args.get("family") or "").strip() or None
+    return jsonify(templates=tiktok_pattern.list_builtins(family=family))
+
+
+@bp.post("/api/campaigns/<campaign_id>/remix/slideshow")
+@require_auth
+def remix_slideshow(campaign_id: str):
+    """Rebuild a slideshow from a builtin or ingested pattern + business copy.
+
+    Body (all optional except we need a campaign):
+    {
+      "builtin_id": "builtin:slideshow-problem-agitate-solve",
+      "pattern_id": "<uuid from tiktok-patterns>",
+      "hook": "...",
+      "cta": "...",
+      "points": ["...", "..."],
+      "channel": "tiktok"
+    }
+    """
+    campaign = supabase.campaign_for_user(campaign_id, g.user_id)
+    if not campaign:
+        return jsonify(error="not_found"), 404
+
+    business = supabase.select(
+        "businesses",
+        params={"id": f"eq.{campaign['business_id']}"},
+        single=True,
+    ) or {}
+
+    body = request.get_json(silent=True) or {}
+    try:
+        result = remix.remix_slideshow(
+            campaign_id,
+            business=business,
+            pattern_id=(body.get("pattern_id") or "").strip() or None,
+            builtin_id=(body.get("builtin_id") or "").strip() or None,
+            hook=(body.get("hook") or "").strip() or None,
+            cta=(body.get("cta") or "").strip() or None,
+            points=body.get("points") if isinstance(body.get("points"), list) else None,
+            channel=(body.get("channel") or "tiktok").strip() or "tiktok",
+        )
+    except remix.RemixError as e:
+        return jsonify(error="remix_failed", detail=str(e)), 422
+    except Exception as e:
+        log.exception("[remix] slideshow failed")
+        return jsonify(error="remix_failed", detail=str(e)), 500
+
+    return jsonify(result), 201
