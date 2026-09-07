@@ -397,7 +397,7 @@ def reap(now: datetime | None = None) -> int:
             "render_jobs",
             {"status": "error" if exhausted else "queued",
              "attempts": attempts,
-             "error": "The GPU worker stopped responding partway through. "
+             "error": "The render worker stopped responding partway through. "
                       + ("Giving up after repeated attempts."
                          if exhausted else "Requeued automatically."),
              "claimed_by": None, "claimed_at": None, "updated_at": _now()},
