@@ -235,7 +235,30 @@ entries beyond the timeframe or pointing at assets that do not exist, and
 good is still yours** — the checks exist so you spend that attention on craft
 rather than on hunting broken references.
 
+## Video production model
+
+Cost-efficient by default:
+
+1. **Adapt (default for market TikTok work)** — ingest a public TikTok URL via
+   oEmbed for the *pattern* (hook, hashtags, author). Never download the other
+   creator's file (TikTok has no official download API). Then ffmpeg-edit an
+   **owned** source (owner upload, licensed stock, or a prior Campaignist UGC
+   render) to that pattern: 9:16, trim, burned-in hook + CTA.
+2. **Generate (fal)** — reserved for **product UGC** (`ugc-testimonial`,
+   `ugc-demo`) and **motion-design**. `POST /api/campaigns/<id>/renders` only
+   queues those formats.
+
+API surface:
+
+- `POST /api/campaigns/<id>/tiktok-patterns` `{ "url": "…" }`
+- `POST /api/campaigns/<id>/adapt` `{ "asset_id", "source_url", "pattern_id?" }`
+- `GET /api/campaigns/<id>/ready-to-post` — caption + signed video when done
+- `GET /api/video-production` — which format ids generate vs adapt
+
+Apply migration `supabase/migrations/0004_tiktok_patterns.sql`.
+
 ## Open decisions
+
 
 1. **Embedding provider.** The blueprint specifies `vector(1536)` but names no
    provider. Kimi does not expose an embeddings endpoint, so the memory loop
