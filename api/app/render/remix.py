@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import requests
 
 from .. import supabase
-from . import hook_demo, queue, slideshow, tiktok_pattern
+from . import hook_demo, meme, queue, slideshow, tiktok_pattern
 
 log = logging.getLogger(__name__)
 
@@ -302,4 +302,125 @@ def remix_hook_demo(
         "video_url": video_url,
         "ready": bool(video_url),
         "caption": "\n\n".join([p for p in (hook_line, offer, cta_line) if p]),
+    }
+
+
+def remix_meme(
+    campaign_id: str,
+    *,
+    business: dict,
+    pattern_id: str | None = None,
+    builtin_id: str | None = None,
+    top_text: str | None = None,
+    bottom_text: str | None = None,
+    image_url: str | None = None,
+    seconds: float = 5.0,
+    channel: str = "tiktok",
+) -> dict:
+    """POV / Nobody: meme card from pattern + product copy."""
+    pattern = resolve_pattern(
+        campaign_id,
+        pattern_id=pattern_id,
+        builtin_id=builtin_id or "builtin:meme-pov-product",
+    )
+    name = business.get("name") or "Your business"
+    offer = business.get("offer_description") or business.get("industry") or name
+    product = offer if len(offer) < 60 else name
+
+    top = (top_text or pattern.get("top_text") or "POV").strip()
+    bottom_tmpl = bottom_text or pattern.get("bottom_text") or f"using {product}"
+    bottom = meme.fill_template(bottom_tmpl, product=product)
+    top = meme.fill_template(top, product=product)
+
+    bg = meme.fetch_image((image_url or "").strip()) if image_url else None
+    # Fall back to pattern thumbnail only as *visual reference colour plate* —
+    # thumbnails are public oEmbed stills; we treat them as optional bg when
+    # the owner did not supply an image. Prefer owner image_url when present.
+    if bg is None and pattern.get("thumbnail_url"):
+        bg = meme.fetch_image(pattern["thumbnail_url"])
+
+    video = meme.render_meme_bytes(
+        top_text=top, bottom_text=bottom, seconds=seconds, bg_image=bg,
+    )
+
+    content = {
+        "hook": top,
+        "body": bottom,
+        "cta": f"Follow {name}",
+        "hashtags": pattern.get("hashtags") or [],
+        "format_family": "meme",
+        "pattern_source": pattern.get("source_url"),
+        "top_text": top,
+        "bottom_text": bottom,
+    }
+
+    asset = supabase.insert(
+        "content_assets",
+        {
+            "campaign_id": campaign_id,
+            "type": "social_post",
+            "channel": channel,
+            "format": "meme-video",
+            "variant": 1,
+            "content": content,
+            "image_brief": "Meme top/bottom captions remixed from market pattern",
+            "status": "generated",
+        },
+    )
+    asset = asset[0] if isinstance(asset, list) else asset
+
+    job = supabase.insert(
+        "render_jobs",
+        {
+            "asset_id": asset["id"],
+            "campaign_id": campaign_id,
+            "format": "meme-video",
+            "aspect_ratio": "9:16",
+            "prompt": {"mode": "remix_meme", "pattern": pattern, "top": top, "bottom": bottom},
+            "status": "claimed",
+            "claimed_by": "remix-inline",
+            "claimed_at": _now(),
+            "progress_at": _now(),
+        },
+    )
+    job = job[0] if isinstance(job, list) else job
+
+    path = f"{campaign_id}/{job['id']}.mp4"
+    upload = supabase.signed_upload_url(queue.BUCKET, path)
+    put = requests.put(
+        upload["url"], data=video,
+        headers={"Content-Type": "video/mp4", "x-upsert": "true"}, timeout=600,
+    )
+    if put.status_code >= 400:
+        supabase.update(
+            "render_jobs",
+            {"status": "error", "error": f"upload_failed:{put.status_code}"},
+            params={"id": f"eq.{job['id']}"}, returning=False,
+        )
+        raise RemixError(f"upload_failed:{put.status_code}")
+
+    done = supabase.update(
+        "render_jobs",
+        {
+            "status": "done", "video_path": path, "error": None,
+            "progress_at": _now(), "updated_at": _now(), "claimed_by": None,
+        },
+        params={"id": f"eq.{job['id']}"},
+    )
+    done = done[0] if isinstance(done, list) else done
+
+    video_url = None
+    try:
+        video_url = supabase.signed_download_url(queue.BUCKET, path)
+    except Exception as e:
+        log.warning("[remix] meme sign failed: %s", e)
+
+    return {
+        "asset": asset,
+        "job": done or job,
+        "top_text": top,
+        "bottom_text": bottom,
+        "video_url": video_url,
+        "ready": bool(video_url),
+        "caption": "\n\n".join([p for p in (top, bottom) if p]),
     }

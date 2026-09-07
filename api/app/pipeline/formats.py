@@ -105,7 +105,19 @@ FORMATS: dict[str, dict] = {
             "licensed stock) — never another creator's TikTok file."
         ),
     },
+    "meme-video": {
+        "label": "Meme Video",
+        "category": "video",
+        "production": "remix",
+        "aspect_ratio": "9:16",
+        "brief_guidance": (
+            "A short POV / Nobody: style meme. Top and bottom captions only, "
+            "optional owned background still. Rebuild from a market pattern with "
+            "the business product name — never another creator's video file."
+        ),
+    },
     "motion-design": {
+
 
         "label": "Motion Design",
         "category": "video",
