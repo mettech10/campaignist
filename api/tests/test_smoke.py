@@ -1465,3 +1465,25 @@ def test_hook_demo_concat(tmp_path):
         demo_seconds=2.5,
     )
     assert len(out) > 2000
+
+# ── Phase 3: meme remix ─────────────────────────────────────────────────────
+
+def test_meme_video_format_is_remix():
+    from app.pipeline import formats
+    assert "meme-video" in formats.REMIX
+
+
+def test_meme_builtins_exist():
+    from app.render import tiktok_pattern
+    assert tiktok_pattern.builtin_by_id("builtin:meme-pov-product")
+    assert len(tiktok_pattern.list_builtins(family="meme")) >= 2
+
+
+def test_meme_render_bytes():
+    from app.render import meme
+    data = meme.render_meme_bytes(
+        top_text="POV",
+        bottom_text="you finally automated the boring bit",
+        seconds=3.0,
+    )
+    assert len(data) > 2000
