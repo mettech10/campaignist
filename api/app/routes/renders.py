@@ -15,6 +15,8 @@ from flask import Blueprint, g, jsonify, request
 from .. import supabase
 from ..auth import require_auth
 from ..render import queue as render_queue, ready as render_ready, runner as render_runner
+from ..render import tiktok_pattern
+from ..pipeline import formats
 
 log = logging.getLogger(__name__)
 bp = Blueprint("renders", __name__)
@@ -106,4 +108,111 @@ def ready_to_post(campaign_id: str):
         ready=sum(1 for i in items if i.get("ready")),
         total=len(items),
         items=items,
+    )
+
+
+@bp.post("/api/campaigns/<campaign_id>/tiktok-patterns")
+@require_auth
+def ingest_tiktok_pattern(campaign_id: str):
+    """Pull public oEmbed for a TikTok URL and store the market pattern.
+
+    Body: { "url": "https://www.tiktok.com/@…/video/…" }
+    Does not download the video file.
+    """
+    campaign = supabase.campaign_for_user(campaign_id, g.user_id)
+    if not campaign:
+        return jsonify(error="not_found"), 404
+
+    body = request.get_json(silent=True) or {}
+    url = (body.get("url") or "").strip()
+    try:
+        oembed, pattern = tiktok_pattern.ingest(url)
+    except tiktok_pattern.TikTokPatternError as e:
+        return jsonify(error="tiktok_pattern_failed", detail=str(e)), 422
+
+    row = supabase.insert(
+        "tiktok_patterns",
+        {"campaign_id": campaign_id, "source_url": pattern["source_url"],
+         "oembed": oembed, "pattern": pattern},
+    )
+    return jsonify(pattern=row), 201
+
+
+@bp.get("/api/campaigns/<campaign_id>/tiktok-patterns")
+@require_auth
+def list_tiktok_patterns(campaign_id: str):
+    if not supabase.campaign_for_user(campaign_id, g.user_id):
+        return jsonify(error="not_found"), 404
+    rows = supabase.select(
+        "tiktok_patterns",
+        params={"campaign_id": f"eq.{campaign_id}", "order": "created_at.desc"},
+    ) or []
+    return jsonify(patterns=rows)
+
+
+@bp.post("/api/campaigns/<campaign_id>/adapt")
+@require_auth
+def start_adapt(campaign_id: str):
+    """Queue an ffmpeg adapt of an owned source to a stored (or inline) pattern.
+
+    Body: {
+      "asset_id": "...",
+      "source_url": "https://…/owned-clip.mp4",   # must be fetchable by the API
+      "pattern_id": "...",                        # optional — from tiktok_patterns
+      "seconds": 15
+    }
+    """
+    campaign = supabase.campaign_for_user(campaign_id, g.user_id)
+    if not campaign:
+        return jsonify(error="not_found"), 404
+
+    body = request.get_json(silent=True) or {}
+    asset_id = (body.get("asset_id") or "").strip()
+    source_url = (body.get("source_url") or "").strip()
+    if not asset_id or not source_url:
+        return jsonify(error="asset_id_and_source_url_required"), 400
+
+    pattern = None
+    pattern_id = (body.get("pattern_id") or "").strip()
+    if pattern_id:
+        row = supabase.select(
+            "tiktok_patterns",
+            params={"id": f"eq.{pattern_id}", "campaign_id": f"eq.{campaign_id}"},
+            single=True,
+        )
+        if not row:
+            return jsonify(error="pattern_not_found"), 404
+        pattern = row.get("pattern") or {}
+
+    try:
+        seconds = int(body.get("seconds") or 15)
+    except (TypeError, ValueError):
+        return jsonify(error="seconds_must_be_a_number"), 400
+
+    try:
+        job = render_queue.enqueue_adapt(
+            campaign_id,
+            asset_id=asset_id,
+            source_url=source_url,
+            pattern=pattern,
+            seconds=max(3, min(seconds, 60)),
+        )
+    except ValueError as e:
+        return jsonify(error=str(e)), 404
+
+    render_runner.start()
+    return jsonify(queued=1, job=job), 202
+
+
+@bp.get("/api/video-production")
+@require_auth
+def video_production_modes():
+    """Which formats generate vs adapt — so the UI can label cost correctly."""
+    return jsonify(
+        generate=formats.GENERATE,
+        adapt=formats.ADAPT,
+        note=(
+            "Generate (fal) is for product UGC and motion-design only. "
+            "Adapt applies a TikTok market pattern to an owned source via ffmpeg."
+        ),
     )
