@@ -472,6 +472,21 @@ def test_a_silent_generation_is_stale():
     assert reaper.is_stale(_campaign(minutes_ago=13))
 
 
+def test_an_old_heartbeat_on_a_restarted_run_looks_stale():
+    """Regenerate used to flip status back to generating without bumping
+    progress_at. The previous run's timestamp made the first poll reap a live
+    regen. This asserts the staleness signal that bug relied on still holds —
+    the route fix is what clears it."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.pipeline import reaper
+
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    assert reaper.is_stale(
+        {"id": "c1", "business_id": "b1", "status": "generating", "progress_at": old}
+    )
+
+
 def test_settled_campaigns_are_never_reaped():
     from app.pipeline import reaper
 
