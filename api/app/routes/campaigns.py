@@ -73,10 +73,26 @@ def list_campaigns():
         params = {"business_id": f"in.({ids})"}
 
     params |= {
-        "select": "id,business_id,goal,status,budget,timeframe_days,created_at,completed_at",
+        # progress_at + error are needed so stranded generating rows can be
+        # reaped on the list path, not only when the detail poll runs.
+        "select": (
+            "id,business_id,goal,status,error,budget,timeframe_days,"
+            "created_at,completed_at,progress_at"
+        ),
         "order": "created_at.desc",
     }
-    return jsonify(supabase.select("campaigns", params=params))
+    rows = supabase.select("campaigns", params=params)
+    # The dashboard list is often the only screen a user opens. Without a reap
+    # here, a worker that died mid-run leaves a permanent "generating" row
+    # until they happen to open the campaign detail poll.
+    out = []
+    for row in rows:
+        if row.get("status") == "generating":
+            row = reaper.reap(row)
+        # progress_at is an internal heartbeat; keep the list contract lean.
+        row.pop("progress_at", None)
+        out.append(row)
+    return jsonify(out)
 
 
 @bp.get("/api/campaigns/<campaign_id>")
@@ -105,9 +121,18 @@ def regenerate_step(campaign_id):
     if not supabase.campaign_for_user(campaign_id, g.user_id):
         return jsonify(error="not_found"), 404
 
+    # Refresh progress_at. A finished campaign still carries its old heartbeat;
+    # flipping status to generating without bumping it makes the reaper treat a
+    # brand-new regen as already stalled on the first poll.
     supabase.update(
-        "campaigns", {"status": "generating", "error": None},
-        params={"id": f"eq.{campaign_id}"}, returning=False,
+        "campaigns",
+        {
+            "status": "generating",
+            "error": None,
+            "progress_at": datetime.now(timezone.utc).isoformat(),
+        },
+        params={"id": f"eq.{campaign_id}"},
+        returning=False,
     )
     runner.start(campaign_id, from_agent=agent)
     return jsonify(campaign_id=campaign_id, status="generating", from_agent=agent), 202
