@@ -40,6 +40,9 @@ MAX_ATTEMPTS = 3
 
 # Only these produce video. The rest of the taxonomy is stills and text.
 VIDEO_FORMATS = {k for k, v in formats.FORMATS.items() if v["category"] == "video"}
+# fal text-to-video is generate-only (product UGC + motion-design). Adapt
+# formats go through enqueue_adapt + ffmpeg, not this set.
+GENERATE_FORMATS = set(formats.GENERATE)
 
 
 def _now() -> str:
@@ -59,7 +62,7 @@ def _parse(ts: str | None) -> datetime | None:
 def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
                      model: str | None = None,
                      asset_ids: set[str] | None = None) -> list[dict]:
-    """Queue a render for every video asset in a campaign.
+    """Queue fal renders for every *generate* video asset in a campaign.
 
     Idempotent by construction: a partial unique index allows only one live job
     per asset, so calling this twice queues nothing the second time rather than
@@ -101,7 +104,10 @@ def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
         if asset_ids is not None and asset["id"] not in asset_ids:
             continue
         fmt = formats.FORMATS.get(asset.get("format") or "")
-        if not fmt or fmt["category"] != "video":
+        # Generate path only. Adapt formats need an owned source + pattern —
+        # see enqueue_adapt. Silently skipping stops us billing fal for clips
+        # that should have been cheap ffmpeg edits.
+        if not fmt or fmt.get("production") != "generate":
             continue
         content = asset.get("content") or {}
         rows.append({
@@ -143,7 +149,62 @@ def enqueue_campaign(campaign_id: str, *, limit: int | None = None,
     return queued
 
 
+def enqueue_adapt(
+    campaign_id: str,
+    *,
+    asset_id: str,
+    source_url: str,
+    pattern: dict | None = None,
+    seconds: int = 15,
+) -> dict:
+    """Queue an ffmpeg adapt of an owned source to a market pattern.
+
+    `source_url` must be a URL Campaignist can fetch (typically a signed
+    Supabase object the owner just uploaded). The TikTok reference itself is
+    never downloaded — only its pattern fields ride on the job.
+    """
+    asset = supabase.select(
+        "content_assets",
+        params={"id": f"eq.{asset_id}", "campaign_id": f"eq.{campaign_id}"},
+        single=True,
+    )
+    if not asset:
+        raise ValueError("asset_not_found")
+
+    fmt = formats.FORMATS.get(asset.get("format") or "") or {}
+    live = supabase.select(
+        "render_jobs",
+        params={"asset_id": f"eq.{asset_id}",
+                "status": "in.(queued,claimed)", "select": "id"},
+    ) or []
+    if live:
+        return live[0]
+
+    content = asset.get("edited_content") or asset.get("content") or {}
+    pattern = pattern or {}
+    row = {
+        "asset_id": asset_id,
+        "campaign_id": campaign_id,
+        "format": asset.get("format") or "founder-piece",
+        "aspect_ratio": fmt.get("aspect_ratio") or "9:16",
+        "prompt": {
+            "mode": "adapt",
+            "source_url": source_url,
+            "pattern": pattern,
+            "seconds": seconds,
+            "brief": asset.get("image_brief") or "",
+            "hook": content.get("hook") or pattern.get("hook") or "",
+            "cta": content.get("cta") or "",
+            "hashtags": content.get("hashtags") or pattern.get("hashtags") or [],
+            "format_label": fmt.get("label") or "",
+        },
+    }
+    queued = supabase.insert("render_jobs", row)
+    return queued[0] if isinstance(queued, list) else queued
+
+
 def claim(worker_id: str) -> dict | None:
+
     """Lease the oldest queued job, or return None if idle.
 
     The status filter in the update is the whole concurrency story: two threads
@@ -333,7 +394,12 @@ def process(job: dict, worker_id: str) -> None:
     should record why while it still can.
     """
     job_id = job["id"]
-    model = (job.get("prompt") or {}).get("model") or Config.FAL_VIDEO_MODEL
+    prompt = job.get("prompt") or {}
+    if prompt.get("mode") == "adapt":
+        _process_adapt(job, worker_id)
+        return
+
+    model = prompt.get("model") or Config.FAL_VIDEO_MODEL
     try:
         request_id = fal.submit(model, _fal_payload(job, model))
         log.info("[render] job %s submitted to %s as %s", job_id, model, request_id)
@@ -369,7 +435,68 @@ def process(job: dict, worker_id: str) -> None:
         fail(job_id, worker_id, f"{type(e).__name__}: {e}")
 
 
+def _process_adapt(job: dict, worker_id: str) -> None:
+    """Fetch an owned source and ffmpeg-adapt it to the pattern."""
+    from . import adapt as adapt_mod
+
+    job_id = job["id"]
+    prompt = job.get("prompt") or {}
+    source_url = (prompt.get("source_url") or "").strip()
+    if not source_url:
+        fail(job_id, worker_id, "adapt_missing_source_url")
+        return
+
+    try:
+        if not heartbeat(job_id, worker_id):
+            raise LeaseLost(job_id)
+
+        resp = requests.get(source_url, timeout=120)
+        if resp.status_code >= 400:
+            raise AdaptFetchError(f"{resp.status_code} {resp.text[:200]}")
+        source_bytes = resp.content
+        if len(source_bytes) < 1000:
+            raise AdaptFetchError("source_too_small")
+
+        if not heartbeat(job_id, worker_id):
+            raise LeaseLost(job_id)
+
+        pattern = prompt.get("pattern") or {}
+        overlay = (prompt.get("hook") or pattern.get("hook") or "")[:80]
+        cta = (prompt.get("cta") or "")[:60]
+        seconds = int(prompt.get("seconds") or 15)
+
+        video = adapt_mod.adapt_bytes(
+            source_bytes, overlay=overlay, cta=cta, seconds=seconds,
+        )
+
+        if not heartbeat(job_id, worker_id):
+            raise LeaseLost(job_id)
+
+        path = f"{job['campaign_id']}/{job_id}.mp4"
+        upload = supabase.signed_upload_url(BUCKET, path)
+        put = requests.put(
+            upload["url"], data=video,
+            headers={"Content-Type": "video/mp4", "x-upsert": "true"}, timeout=600,
+        )
+        if put.status_code >= 400:
+            raise UploadFailed(f"{put.status_code} {put.text[:200]}")
+
+        complete(job_id, worker_id, path)
+        log.info("[render] adapt job %s done (%.1f MB)", job_id, len(video) / 1e6)
+
+    except LeaseLost:
+        log.warning("[render] adapt job %s: lease lost mid-edit, leaving it alone", job_id)
+    except Exception as e:
+        log.exception("[render] adapt job %s failed", job_id)
+        fail(job_id, worker_id, f"{type(e).__name__}: {e}")
+
+
+class AdaptFetchError(RuntimeError):
+    pass
+
+
 def reap(now: datetime | None = None) -> int:
+
     """Return abandoned leases to the queue.
 
     An interrupted Vast box cannot tell us it died, so nothing else will ever
