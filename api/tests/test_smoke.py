@@ -1223,3 +1223,83 @@ def test_the_profile_draft_matches_the_onboarding_shape():
     # Constrained to the same options the quiz offers, so a drafted voice can be
     # edited with the same toggles.
     assert voice["tone"]["enum"] == ["Formal", "Conversational", "Casual"]
+
+# ── Ready-to-post packages ──────────────────────────────────────────────────
+
+def test_ready_to_post_caption_joins_hook_body_cta_and_hashtags():
+    from app.render import ready
+
+    asset = {
+        "content": {
+            "hook": "Stop overpaying for wedding cakes",
+            "body": "We quote the same week you enquire.",
+            "cta": "Book a tasting",
+            "hashtags": ["WeddingCake", "#ManchesterBaker"],
+        }
+    }
+    caption = ready.caption_for(asset)
+    assert "Stop overpaying" in caption
+    assert "Book a tasting" in caption
+    assert "#WeddingCake" in caption
+    assert "#ManchesterBaker" in caption
+
+
+def test_ready_to_post_prefers_edited_copy():
+    from app.render import ready
+
+    asset = {
+        "content": {"hook": "Old", "body": "B", "cta": "C", "hashtags": []},
+        "edited_content": {"hook": "New hook", "body": "B", "cta": "C", "hashtags": []},
+    }
+    assert ready.caption_for(asset).startswith("New hook")
+
+
+def test_ready_to_post_overlay_is_short():
+    from app.render import ready
+
+    long_hook = "A" * 80
+    assert len(ready.overlay_for({"content": {"hook": long_hook}})) <= ready.OVERLAY_LIMIT
+
+
+def test_pack_campaign_marks_ready_only_with_a_signed_video(monkeypatch):
+    from app.render import ready
+
+    assets = [{
+        "id": "a1", "format": "ugc-testimonial", "channel": "tiktok",
+        "variant": 1, "status": "generated",
+        "content": {"hook": "H", "body": "B", "cta": "C", "hashtags": ["x"]},
+        "edited_content": None,
+    }]
+    jobs = [{
+        "asset_id": "a1", "status": "done", "video_path": "c1/j1.mp4",
+        "updated_at": "2026-09-07T12:00:00Z", "error": None,
+    }]
+
+    monkeypatch.setattr(ready.supabase, "select",
+                        lambda table, **kw: assets if table == "content_assets" else jobs)
+    monkeypatch.setattr(ready.supabase, "signed_download_url",
+                        lambda bucket, path: f"https://signed.example/{path}")
+
+    packed = ready.pack_campaign("c1")
+    assert len(packed) == 1
+    assert packed[0]["ready"] is True
+    assert packed[0]["platform"] == "tiktok"
+    assert packed[0]["video_url"].endswith("c1/j1.mp4")
+    assert packed[0]["caption"].startswith("H")
+
+
+def test_pack_campaign_without_a_render_is_not_ready(monkeypatch):
+    from app.render import ready
+
+    assets = [{
+        "id": "a1", "format": "founder-piece", "channel": "instagram",
+        "variant": 1, "status": "generated",
+        "content": {"hook": "H", "body": "", "cta": "", "hashtags": []},
+    }]
+    monkeypatch.setattr(ready.supabase, "select",
+                        lambda table, **kw: assets if table == "content_assets" else [])
+    packed = ready.pack_campaign("c1")
+    assert packed[0]["ready"] is False
+    assert packed[0]["render_status"] == "not_queued"
+    assert packed[0]["video_url"] is None
+

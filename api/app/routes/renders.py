@@ -14,7 +14,7 @@ from flask import Blueprint, g, jsonify, request
 
 from .. import supabase
 from ..auth import require_auth
-from ..render import queue as render_queue, runner as render_runner
+from ..render import queue as render_queue, ready as render_ready, runner as render_runner
 
 log = logging.getLogger(__name__)
 bp = Blueprint("renders", __name__)
@@ -85,3 +85,25 @@ def list_renders(campaign_id: str):
                 # finished render; don't fail the whole list over it.
                 log.warning("[render] could not sign %s: %s", job["video_path"], e)
     return jsonify(jobs=jobs)
+
+
+@bp.get("/api/campaigns/<campaign_id>/ready-to-post")
+@require_auth
+def ready_to_post(campaign_id: str):
+    """TikTok / Reels packages: caption + overlay + signed video when rendered.
+
+    One row per video asset. `ready` is true only when a finished render has a
+    playable URL — captions alone are not ready-to-post.
+    """
+    campaign = supabase.campaign_for_user(campaign_id, g.user_id)
+    if not campaign:
+        return jsonify(error="not_found"), 404
+
+    render_queue.reap()
+    items = render_ready.pack_campaign(campaign_id)
+    return jsonify(
+        campaign_id=campaign_id,
+        ready=sum(1 for i in items if i.get("ready")),
+        total=len(items),
+        items=items,
+    )
