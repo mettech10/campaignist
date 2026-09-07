@@ -864,7 +864,7 @@ def test_only_video_assets_are_queued_and_never_twice(monkeypatch):
     def fake_select(table, *, params=None, **kw):
         if table == "content_assets":
             return [
-                {"id": "a1", "format": "b-roll-montage", "content": {}, "image_brief": "b"},
+                {"id": "a1", "format": "ugc-testimonial", "content": {}, "image_brief": "b"},
                 {"id": "a2", "format": "quote-card", "content": {}, "image_brief": "b"},
                 {"id": "a3", "format": "long-form-email", "content": {}, "image_brief": ""},
                 {"id": "a4", "format": "ugc-testimonial", "content": {}, "image_brief": "b"},
@@ -991,7 +991,7 @@ def test_a_render_can_be_limited_to_one(monkeypatch):
     monkeypatch.setattr(queue.supabase, "insert",
                         lambda t, rows: inserted.extend(rows) or rows)
     monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
-        [{"id": f"a{i}", "format": "b-roll-montage", "content": {}, "image_brief": "b"}
+        [{"id": f"a{i}", "format": "ugc-testimonial", "content": {}, "image_brief": "b"}
          for i in range(5)] if table == "content_assets" else []
     ))
 
@@ -1062,7 +1062,7 @@ def test_a_job_can_override_the_configured_model(monkeypatch):
     monkeypatch.setattr(queue.supabase, "insert",
                         lambda t, rows: inserted.extend(rows) or rows)
     monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
-        [{"id": "a1", "format": "founder-piece", "content": {}, "image_brief": "b"}]
+        [{"id": "a1", "format": "ugc-testimonial", "content": {}, "image_brief": "b"}]
         if table == "content_assets" else []))
 
     queue.enqueue_campaign("c1", model="fal-ai/veo3/fast")
@@ -1149,7 +1149,7 @@ def test_specific_assets_can_be_rendered(monkeypatch):
     monkeypatch.setattr(queue.supabase, "insert",
                         lambda t, rows: inserted.extend(rows) or rows)
     monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
-        [{"id": f"a{i}", "format": "founder-piece", "content": {}, "image_brief": "b"}
+        [{"id": f"a{i}", "format": "ugc-demo", "content": {}, "image_brief": "b"}
          for i in range(4)] if table == "content_assets" else []))
 
     queue.enqueue_campaign("c1", asset_ids={"a2"})
@@ -1303,3 +1303,77 @@ def test_pack_campaign_without_a_render_is_not_ready(monkeypatch):
     assert packed[0]["render_status"] == "not_queued"
     assert packed[0]["video_url"] is None
 
+# ── TikTok adapt vs generate production model ───────────────────────────────
+
+def test_generate_formats_are_ugc_and_motion_only():
+    """fal is the expensive path — only product UGC and motion-design."""
+    from app.pipeline import formats
+
+    assert set(formats.GENERATE) == {"ugc-testimonial", "ugc-demo", "motion-design"}
+    assert "founder-piece" in formats.ADAPT
+    assert "b-roll-montage" in formats.ADAPT
+    for fid in formats.GENERATE:
+        assert formats.FORMATS[fid]["production"] == "generate"
+
+
+def test_fal_enqueue_skips_adapt_formats(monkeypatch):
+    from app.render import queue
+
+    inserted = []
+    monkeypatch.setattr(queue.supabase, "insert",
+                        lambda t, rows: inserted.extend(rows) or rows)
+    monkeypatch.setattr(queue.supabase, "select", lambda table, *, params=None, **kw: (
+        [
+            {"id": "a1", "format": "founder-piece", "content": {}, "image_brief": "b"},
+            {"id": "a2", "format": "ugc-testimonial", "content": {}, "image_brief": "b"},
+            {"id": "a3", "format": "b-roll-montage", "content": {}, "image_brief": "b"},
+        ] if table == "content_assets" else []
+    ))
+
+    queue.enqueue_campaign("c1")
+    assert [r["asset_id"] for r in inserted] == ["a2"]
+
+
+def test_tiktok_pattern_extracts_hook_and_hashtags():
+    from app.render import tiktok_pattern
+
+    oembed = {
+        "type": "video",
+        "title": "Stop overpaying for cakes #WeddingTok #Manchester",
+        "author_name": "Baker",
+        "author_url": "https://www.tiktok.com/@baker",
+        "thumbnail_url": "https://example.com/t.jpg",
+        "provider_name": "TikTok",
+    }
+    pattern = tiktok_pattern.extract_pattern(
+        oembed, source_url="https://www.tiktok.com/@baker/video/1"
+    )
+    assert pattern["hook"] == "Stop overpaying for cakes"
+    assert "#WeddingTok" in pattern["hashtags"]
+    assert "not downloaded" in pattern["notes"].lower()
+
+
+def test_tiktok_url_must_be_tiktok():
+    from app.render import tiktok_pattern
+    import pytest
+
+    with pytest.raises(tiktok_pattern.TikTokPatternError):
+        tiktok_pattern.normalize_url("https://youtube.com/watch?v=1")
+
+
+def test_adapt_ffmpeg_writes_an_mp4(tmp_path):
+    """Smoke the local ffmpeg path with a tiny generated source clip."""
+    import subprocess
+    from pathlib import Path
+
+    from app.render import adapt
+
+    src = tmp_path / "in.mp4"
+    dest = tmp_path / "out.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x560:d=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    adapt.adapt_file(src, dest, overlay="Hook line", cta="Book now", seconds=2)
+    assert dest.stat().st_size > 1000
