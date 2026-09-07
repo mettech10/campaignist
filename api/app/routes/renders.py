@@ -339,3 +339,54 @@ def remix_hook_demo(campaign_id: str):
         return jsonify(error="remix_failed", detail=str(e)), 500
 
     return jsonify(result), 201
+
+@bp.post("/api/campaigns/<campaign_id>/remix/meme")
+@require_auth
+def remix_meme(campaign_id: str):
+    """POV / Nobody: meme from builtin or ingested pattern + product copy.
+
+    Body:
+    {
+      "builtin_id": "builtin:meme-pov-product",
+      "pattern_id": "<uuid>",
+      "top_text": "...",
+      "bottom_text": "... may include {product}",
+      "image_url": "https://…/owned-still.jpg",
+      "seconds": 5,
+      "channel": "tiktok"
+    }
+    """
+    campaign = supabase.campaign_for_user(campaign_id, g.user_id)
+    if not campaign:
+        return jsonify(error="not_found"), 404
+
+    business = supabase.select(
+        "businesses",
+        params={"id": f"eq.{campaign['business_id']}"},
+        single=True,
+    ) or {}
+    body = request.get_json(silent=True) or {}
+    try:
+        seconds = float(body.get("seconds") or 5)
+    except (TypeError, ValueError):
+        return jsonify(error="seconds_must_be_a_number"), 400
+
+    try:
+        result = remix.remix_meme(
+            campaign_id,
+            business=business,
+            pattern_id=(body.get("pattern_id") or "").strip() or None,
+            builtin_id=(body.get("builtin_id") or "").strip() or None,
+            top_text=(body.get("top_text") or "").strip() or None,
+            bottom_text=(body.get("bottom_text") or "").strip() or None,
+            image_url=(body.get("image_url") or "").strip() or None,
+            seconds=max(3.0, min(seconds, 15.0)),
+            channel=(body.get("channel") or "tiktok").strip() or "tiktok",
+        )
+    except remix.RemixError as e:
+        return jsonify(error="remix_failed", detail=str(e)), 422
+    except Exception as e:
+        log.exception("[remix] meme failed")
+        return jsonify(error="remix_failed", detail=str(e)), 500
+
+    return jsonify(result), 201
